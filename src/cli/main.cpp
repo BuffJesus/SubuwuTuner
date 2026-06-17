@@ -16069,6 +16069,1659 @@ int cmd_subaru_presence_test(int argc, char *argv[]) {
     return 0;
 }
 
+// cmd_subaru_precondition_chain_probe — round-14 §7.1.
+//
+// Issues a single SSM-A8 multi-address read for the 10 RAM cells that
+// decide WHERE the DSC 0x10 0x02 precondition chain breaks on the
+// bench rig. Reports each value and prints a one-line interpretation
+// per round-14 §7.2 / §7.3 of which stage of the upstream state
+// machine is the wall.
+//
+// Round 14 finding: the polling task at ROM 0x00080642 actively zeroes
+// the precondition bitmap unless bit 2 of RAM 0xFFF891B6 is set. That
+// gate is the last stage of a 4-stage state machine whose stage-1
+// bootstrap (bit 1 of 0xFFF891B6) is set by upstream code not yet
+// located. Reading these 10 bytes localizes the wall without a second
+// CAN-ID sweep.
+//
+// No heartbeat injection; no SA prelude. Bench ECU is donor LF79002P
+// stock — SSM-A8 reads work in default session.
+int cmd_subaru_precondition_chain_probe(int argc, char *argv[]) {
+    std::optional<std::string> transport_kind;
+    std::string dll_path;
+    std::string device_path;
+    bool verbose = false;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr,
+                             "subaru-precondition-chain-probe: %s requires a value\n",
+                             name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--transport") {
+            if (auto const *v = require_arg("--transport"); v)
+                transport_kind = std::string{v};
+            else
+                return 2;
+        } else if (a == "--device") {
+            if (auto const *v = require_arg("--device"); v)
+                device_path = v;
+            else
+                return 2;
+        } else if (a == "--dll") {
+            if (auto const *v = require_arg("--dll"); v)
+                dll_path = v;
+            else
+                return 2;
+        } else if (a == "--verbose") {
+            verbose = true;
+        } else {
+            std::fprintf(stderr,
+                         "subaru-precondition-chain-probe: unknown option: %s\n",
+                         argv[i]);
+            return 2;
+        }
+    }
+
+    if (!transport_kind.has_value()) {
+        std::fputs(
+            "subaru-precondition-chain-probe — round-14 §7.1 chain probe.\n"
+            "\n"
+            "Issues a single SSM-A8 multi-addr read for the 10 RAM cells\n"
+            "that decide WHERE the DSC 0x10 0x02 precondition chain breaks.\n"
+            "Reports each byte and interprets which stage of the upstream\n"
+            "state machine is the wall (per round-14 §7.2 / §7.3).\n"
+            "\n"
+            "Usage:\n"
+            "  subuwutuner-cli subaru-precondition-chain-probe \\\n"
+            "      --transport obdx --device COM5 [--verbose]\n",
+            stderr);
+        return 2;
+    }
+
+    auto const kind = st::transport::parse_kind(*transport_kind);
+    if (!kind.has_value()) {
+        std::fprintf(stderr,
+                     "subaru-precondition-chain-probe: --transport '%s' not recognized\n",
+                     transport_kind->c_str());
+        return 2;
+    }
+    st::transport::TransportSpec const spec{*kind, dll_path, device_path};
+    auto t = st::transport::open_transport(spec);
+    if (!t.has_value()) {
+        std::fprintf(stderr, "subaru-precondition-chain-probe: %s\n",
+                     t.error().to_string().c_str());
+        return 1;
+    }
+    if (verbose)
+        st::transport::obdx::set_trace_enabled(true);
+    st::transport::LinkConfig const link{st::transport::LinkKind::CanIso15765, 500000,
+                                         0x000007E0, 0x000007E8};
+    if (auto s = (*t)->open(link); !s.has_value()) {
+        std::fprintf(stderr,
+                     "subaru-precondition-chain-probe: transport open failed: %s\n",
+                     s.error().to_string().c_str());
+        return 1;
+    }
+
+    // Round-14 §7.1: SSM-A8 24-bit truncation. RAM addresses 0xFFFxxxxx
+    // become 0x00xxxxxx on the wire.
+    struct ChainCell {
+        std::uint32_t addr;
+        char const   *role;
+    };
+    constexpr std::array<ChainCell, 10> cells{{
+        {0xFFF891B6U, "writer gate byte (bits 1..5 are the 4-stage state machine)"},
+        {0xFFF89216U, "primary signal source for bitmap bytes idx 5..14"},
+        {0xFFF88DCEU, "signal gating bit 1->2 transition (high byte of u16; thr 0x8B86)"},
+        {0xFFF88D86U, "signal gating bit 2->3 transition (high byte of u16; thr 0x6183)"},
+        {0xFFF8A604U, "32-bit accumulator word - high byte (bits 28..31 carry the 4 descriptor flags)"},
+        {0xFFF8A605U, "32-bit accumulator word - byte 1"},
+        {0xFFF8A606U, "32-bit accumulator word - byte 2"},
+        {0xFFF8A607U, "32-bit accumulator word - low byte"},
+        {0xFFF8A6CEU, "primary bit-accumulator (bit 5 -> bitmap[E9], bit 1 -> [EA])"},
+        {0xFFF8A6D0U, "tertiary bit-accumulator (bit 5 -> bitmap[EB], bit 1 -> [EC])"},
+    }};
+
+    std::vector<std::uint32_t> addrs;
+    addrs.reserve(cells.size());
+    for (auto const &c : cells)
+        addrs.push_back(c.addr & 0x00FFFFFFU);
+
+    st::ecu::ssm::SsmClient ssm{**t, st::ecu::ssm::Framing::IsoTp};
+    auto r = ssm.read(addrs, std::chrono::milliseconds{2000});
+    if (!r.has_value()) {
+        std::fprintf(stderr, "subaru-precondition-chain-probe: SSM-A8 read failed: %s\n",
+                     r.error().to_string().c_str());
+        return 1;
+    }
+    auto const &vals = *r;
+    if (vals.size() != cells.size()) {
+        std::fprintf(stderr,
+                     "subaru-precondition-chain-probe: expected %zu bytes, got %zu\n",
+                     cells.size(), vals.size());
+        return 1;
+    }
+
+    std::fputs("\nRound-14 §7.1 precondition chain probe\n", stdout);
+    std::fputs("--------------------------------------\n", stdout);
+    for (std::size_t i = 0; i < cells.size(); ++i) {
+        std::fprintf(stdout, "  0x%08X = 0x%02X  %s\n",
+                     cells[i].addr, vals[i], cells[i].role);
+    }
+
+    std::uint8_t const gate  = vals[0];   // 0xFFF891B6
+    std::uint8_t const acc_word_b0 = vals[4];
+    std::uint8_t const acc_word_b1 = vals[5];
+    std::uint8_t const acc_word_b2 = vals[6];
+    std::uint8_t const acc_word_b3 = vals[7];
+    bool const gate_bit1 = (gate & 0x02U) != 0;
+    bool const gate_bit2 = (gate & 0x04U) != 0;
+    bool const gate_bit3 = (gate & 0x08U) != 0;
+    bool const gate_bit4 = (gate & 0x10U) != 0;
+    bool const gate_bit5 = (gate & 0x20U) != 0;
+    std::uint32_t const acc_word =
+        (static_cast<std::uint32_t>(acc_word_b0) << 24) |
+        (static_cast<std::uint32_t>(acc_word_b1) << 16) |
+        (static_cast<std::uint32_t>(acc_word_b2) << 8)  |
+         static_cast<std::uint32_t>(acc_word_b3);
+
+    std::fputc('\n', stdout);
+    std::fprintf(stdout, "  0xFFF891B6 bits: 1=%d  2=%d  3=%d  4=%d  5=%d  (raw 0x%02X)\n",
+                 gate_bit1 ? 1 : 0, gate_bit2 ? 1 : 0, gate_bit3 ? 1 : 0,
+                 gate_bit4 ? 1 : 0, gate_bit5 ? 1 : 0, gate);
+    std::fprintf(stdout, "  0xFFF8A604 word (be): 0x%08X  (bits 28..31 = %d %d %d %d)\n",
+                 acc_word,
+                 (acc_word & 0x10000000U) ? 1 : 0,
+                 (acc_word & 0x20000000U) ? 1 : 0,
+                 (acc_word & 0x40000000U) ? 1 : 0,
+                 (acc_word & 0x80000000U) ? 1 : 0);
+
+    std::fputs("\nChain interpretation\n", stdout);
+    std::fputs("--------------------\n", stdout);
+    if (gate_bit2) {
+        std::fputs("  WRITER GATE OPEN. Bit 2 of 0xFFF891B6 is set — the polling\n"
+                   "  task at ROM 0x00080642 is running its normal evaluation path.\n"
+                   "  If the bitmap is still empty, the wall is downstream (signal\n"
+                   "  decoder / individual byte triggers), not the gate. Inspect\n"
+                   "  the 0xFFF8A6D1..EC bitmap region directly via ssm-a8-poll.\n",
+                   stdout);
+    } else if (gate_bit1) {
+        std::fputs("  WALL = signal at 0xFFF88DCE not crossing threshold 0x8B86.\n"
+                   "  Stage 1 bootstrap (bit 1 of 0xFFF891B6) is set, but the\n"
+                   "  signal gating the bit 1->2 transition is below threshold.\n"
+                   "  Round-15: locate the CAN-RX decoder that writes 0xFFF88DCE\n"
+                   "  and inject a frame whose decoded value clears the threshold.\n",
+                   stdout);
+    } else {
+        std::fputs("  WALL = upstream of state-machine setter at ROM 0x0009A100.\n"
+                   "  Bit 1 of 0xFFF891B6 is clear — the bootstrap that starts the\n"
+                   "  4-stage chain has not fired. Round-15: find the function\n"
+                   "  that sets bit 1 of 0xFFF891B6 (single-setter hunt).\n",
+                   stdout);
+    }
+    if (acc_word == 0U) {
+        if (gate_bit2) {
+            std::fputs("  Accumulator word 0xFFF8A604 is zero DESPITE writer gate\n"
+                       "  being open — descriptor consumer / signal decoders are not\n"
+                       "  populating bits 28..31 of the word. The wall is downstream\n"
+                       "  of the gate. Round-15: locate the consumer that iterates\n"
+                       "  0x0006FA00..0x000702FC and sets bits in 0xFFF8A604.\n",
+                       stdout);
+        } else {
+            std::fputs("  Accumulator word 0xFFF8A604 is zero — no bitmap-touching\n"
+                       "  descriptor has fired (consistent with gate closed).\n",
+                       stdout);
+        }
+    } else {
+        std::fprintf(stdout,
+                     "  Accumulator word 0xFFF8A604 = 0x%08X (non-zero) — at least\n"
+                     "  one bitmap-touching descriptor has fired. Cross-check\n"
+                     "  bits 28..31 against the descriptor table at 0x0006FE98..FEE0.\n",
+                     acc_word);
+    }
+    std::fputc('\n', stdout);
+    std::fflush(stdout);
+    return 0;
+}
+
+// cmd_subaru_ram_snapshot — one-shot SSM-A8 read of a RAM range with
+// hex+ASCII pretty-print. Round-15 exploration tool: read the bitmap
+// region (0xFFF8A6CE..0xFFF8A6F0) and state-machine region
+// (0xFFF891B0..0xFFF891C8) to ground-truth what the chain probe only
+// sampled. --preset bitmap dumps both regions in one invocation.
+int cmd_subaru_ram_snapshot(int argc, char *argv[]) {
+    std::optional<std::string> transport_kind;
+    std::string dll_path;
+    std::string device_path;
+    std::optional<std::uint32_t> start;
+    std::optional<std::uint32_t> count;
+    std::optional<std::string> preset;
+    bool verbose = false;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "subaru-ram-snapshot: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--transport") {
+            if (auto const *v = require_arg("--transport"); v)
+                transport_kind = std::string{v};
+            else
+                return 2;
+        } else if (a == "--device") {
+            if (auto const *v = require_arg("--device"); v)
+                device_path = v;
+            else
+                return 2;
+        } else if (a == "--dll") {
+            if (auto const *v = require_arg("--dll"); v)
+                dll_path = v;
+            else
+                return 2;
+        } else if (a == "--start") {
+            auto const *v = require_arg("--start");
+            if (v == nullptr)
+                return 2;
+            char *end = nullptr;
+            auto const val = std::strtoull(v, &end, 0);
+            if (end == v || *end != '\0' || val > 0xFFFFFFFFULL) {
+                std::fputs("subaru-ram-snapshot: --start must be a 32-bit address\n",
+                           stderr);
+                return 2;
+            }
+            start = static_cast<std::uint32_t>(val);
+        } else if (a == "--count") {
+            auto const *v = require_arg("--count");
+            if (v == nullptr)
+                return 2;
+            char *end = nullptr;
+            auto const val = std::strtoull(v, &end, 0);
+            if (end == v || *end != '\0' || val == 0 || val > 256ULL) {
+                std::fputs("subaru-ram-snapshot: --count must be 1..256\n", stderr);
+                return 2;
+            }
+            count = static_cast<std::uint32_t>(val);
+        } else if (a == "--preset") {
+            if (auto const *v = require_arg("--preset"); v)
+                preset = std::string{v};
+            else
+                return 2;
+        } else if (a == "--verbose") {
+            verbose = true;
+        } else {
+            std::fprintf(stderr, "subaru-ram-snapshot: unknown option: %s\n", argv[i]);
+            return 2;
+        }
+    }
+
+    if (!transport_kind.has_value()) {
+        std::fputs(
+            "subaru-ram-snapshot — one-shot SSM-A8 RAM range read.\n"
+            "\n"
+            "Usage:\n"
+            "  subuwutuner-cli subaru-ram-snapshot --transport obdx --device COM4 \\\n"
+            "      (--start <addr> --count <N>  |  --preset <name>) [--verbose]\n"
+            "\n"
+            "Presets:\n"
+            "  bitmap            Dumps state-machine region 0xFFF891B0..0xFFF891C7 (24 B)\n"
+            "                    and bitmap region 0xFFF8A6CE..0xFFF8A6F0 (35 B).\n"
+            "                    Belongs to the round-14 bitmap subsystem; NOT on the\n"
+            "                    DSC 0x10 0x02 path (see round-15 handoff).\n"
+            "  dsc-programming   Reads the 6 RAM cells the real DSC 0x10 handler at\n"
+            "                    ROM 0x000BEDCC checks (round-15). Per-gate pass/fail\n"
+            "                    decode and diagnosis line of which gate blocks.\n"
+            "  dsc-faults        Reads the 4 RAM bytes the gate-5 fault aggregator at\n"
+            "                    ROM 0x00077E60 ORs into 0xFFF99835 (round-16). Reports\n"
+            "                    which of the 5 fault bits is asserted.\n"
+            "  dsc-fault-context Reads 6 diagnostic cells for round-17 analyst:\n"
+            "                    the F2/F3/F4 clearer-gate (0xFFF88EC8 bit 0),\n"
+            "                    adjacent fault bytes, and the gate-5 computed-value\n"
+            "                    input (0xFFF8BB0A u16).\n",
+            stderr);
+        return 2;
+    }
+
+    bool const is_dsc_programming_preset =
+        preset.has_value() && *preset == "dsc-programming";
+    bool const is_dsc_faults_preset =
+        preset.has_value() && *preset == "dsc-faults";
+    bool const is_dsc_fault_context_preset =
+        preset.has_value() && *preset == "dsc-fault-context";
+
+    struct Region {
+        std::uint32_t start;
+        std::uint32_t count;
+        char const   *label;
+    };
+    std::vector<Region> regions;
+    if (preset.has_value() && !is_dsc_programming_preset && !is_dsc_faults_preset &&
+        !is_dsc_fault_context_preset) {
+        if (*preset != "bitmap") {
+            std::fprintf(stderr, "subaru-ram-snapshot: unknown preset '%s'\n",
+                         preset->c_str());
+            return 2;
+        }
+        regions.push_back({0xFFF891B0U, 24U,
+                           "state-machine region (0xFFF891B6 = the 4-stage gate byte)"});
+        regions.push_back({0xFFF8A6CEU, 35U,
+                           "precondition bitmap region (round-14 §4.2 corrected geometry)"});
+    } else if (!is_dsc_programming_preset && !is_dsc_faults_preset &&
+               !is_dsc_fault_context_preset) {
+        if (!start.has_value() || !count.has_value()) {
+            std::fputs(
+                "subaru-ram-snapshot: --start and --count required when no --preset\n",
+                stderr);
+            return 2;
+        }
+        regions.push_back({*start, *count, "user-specified"});
+    }
+
+    auto const kind = st::transport::parse_kind(*transport_kind);
+    if (!kind.has_value()) {
+        std::fprintf(stderr, "subaru-ram-snapshot: --transport '%s' not recognized\n",
+                     transport_kind->c_str());
+        return 2;
+    }
+    st::transport::TransportSpec const spec{*kind, dll_path, device_path};
+    auto t = st::transport::open_transport(spec);
+    if (!t.has_value()) {
+        std::fprintf(stderr, "subaru-ram-snapshot: %s\n", t.error().to_string().c_str());
+        return 1;
+    }
+    if (verbose)
+        st::transport::obdx::set_trace_enabled(true);
+    st::transport::LinkConfig const link{st::transport::LinkKind::CanIso15765, 500000,
+                                         0x000007E0, 0x000007E8};
+    if (auto s = (*t)->open(link); !s.has_value()) {
+        std::fprintf(stderr, "subaru-ram-snapshot: transport open failed: %s\n",
+                     s.error().to_string().c_str());
+        return 1;
+    }
+
+    st::ecu::ssm::SsmClient ssm{**t, st::ecu::ssm::Framing::IsoTp};
+
+    if (is_dsc_programming_preset) {
+        // Round-15 handoff §2: the real DSC SID 0x10 handler at ROM
+        // 0x000BEDCC reads these 6 RAM cells. Each is gated by an
+        // explicit predicate; report pass/fail per gate and diagnose
+        // the most likely cause when 0x10 0x02 NRC 0x22s.
+        constexpr std::array<std::uint32_t, 6> dsc_addrs{
+            0xFFF99A7EU,  // gate 1 — DSC programming master flag (bit 7)
+            0xFFF9DD61U,  // gate 2/3 — signal in [0x80, 0xB4]
+            0xFFF8D3DCU,  // gate 4 — counter < 4
+            0xFFF99835U,  // gate 5 — fault counter <= 0x05
+            0xFFF9B853U,  // gate 6 — session-state byte (== 0x02 or 0x03)
+            0xFFF9B854U,  // gate 7 — Extended→Programming transition (== 0x01)
+        };
+        std::vector<std::uint32_t> addrs;
+        addrs.reserve(dsc_addrs.size());
+        for (auto a : dsc_addrs)
+            addrs.push_back(a & 0x00FFFFFFU);
+        auto rd = ssm.read(addrs, std::chrono::milliseconds{3000});
+        if (!rd.has_value()) {
+            std::fprintf(stderr, "subaru-ram-snapshot: SSM-A8 read failed: %s\n",
+                         rd.error().to_string().c_str());
+            return 1;
+        }
+        auto const &v = *rd;
+        std::fputs("\nDSC 0x10 0x02 precondition snapshot (round-15 handler at ROM 0x000BEDCC)\n",
+                   stdout);
+        std::fputs("-----------------------------------------------------------------------\n",
+                   stdout);
+
+        struct GateResult {
+            bool pass;
+            std::string detail;
+        };
+        std::array<GateResult, 6> g{};
+
+        // Gate 1 — bit 7 of 0xFFF99A7E (DSC programming master flag)
+        {
+            bool const ok = (v[0] & 0x80U) != 0;
+            char buf[128];
+            std::snprintf(buf, sizeof(buf), "0xFFF99A7E = 0x%02X  (bit 7 %s)",
+                          v[0], ok ? "set" : "CLEAR");
+            g[0] = {ok, buf};
+        }
+        // Gate 2/3 — 0xFFF9DD61 in [0x80, 0xB4]
+        {
+            bool const ok = v[1] >= 0x80U && v[1] <= 0xB4U;
+            char buf[128];
+            std::snprintf(buf, sizeof(buf),
+                          "0xFFF9DD61 = 0x%02X  (in [0x80, 0xB4]: %s)",
+                          v[1], ok ? "yes" : "NO");
+            g[1] = {ok, buf};
+        }
+        // Gate 4 — 0xFFF8D3DC < 4
+        {
+            bool const ok = v[2] < 4U;
+            char buf[128];
+            std::snprintf(buf, sizeof(buf), "0xFFF8D3DC = 0x%02X  (< 4: %s)",
+                          v[2], ok ? "yes" : "NO");
+            g[2] = {ok, buf};
+        }
+        // Gate 5 — 0xFFF99835 <= 0x05
+        {
+            bool const ok = v[3] <= 0x05U;
+            char buf[128];
+            std::snprintf(buf, sizeof(buf), "0xFFF99835 = 0x%02X  (<= 0x05: %s)",
+                          v[3], ok ? "yes" : "NO");
+            g[3] = {ok, buf};
+        }
+        // Gate 6 — 0xFFF9B853 == 0x02 OR == 0x03 (current session state)
+        {
+            bool const ok = v[4] == 0x02U || v[4] == 0x03U;
+            char const *session_name =
+                v[4] == 0x01U ? "Default" :
+                v[4] == 0x02U ? "Programming" :
+                v[4] == 0x03U ? "Extended" : "unknown";
+            char buf[128];
+            std::snprintf(buf, sizeof(buf),
+                          "0xFFF9B853 = 0x%02X (%s)  (== 0x02 or 0x03: %s)",
+                          v[4], session_name, ok ? "yes" : "NO");
+            g[4] = {ok, buf};
+        }
+        // Gate 7 — 0xFFF9B854 == 0x01 (only checked on Extended→Programming transition)
+        {
+            bool const ok = v[5] == 0x01U;
+            char buf[160];
+            std::snprintf(buf, sizeof(buf),
+                          "0xFFF9B854 = 0x%02X  (== 0x01: %s; only checked on Extended->Programming)",
+                          v[5], ok ? "yes" : "NO");
+            g[5] = {ok, buf};
+        }
+
+        for (std::size_t i = 0; i < g.size(); ++i) {
+            std::fprintf(stdout, "  [%s] gate %zu  %s\n",
+                         g[i].pass ? "OK" : "XX", i + 1, g[i].detail.c_str());
+        }
+
+        std::fputs("\nDiagnosis: ", stdout);
+        bool diagnosed = false;
+        for (std::size_t i = 0; i < 5; ++i) {  // gates 1..5 are unconditional
+            if (!g[i].pass) {
+                static char const *const causes[5] = {
+                    "gate 1 — DSC programming master flag bit 7 is CLEAR. "
+                        "Send analyst `subaru-ram-snapshot --start 0xFFF99A78 --count 16` "
+                        "for context; analyst will trace the setter.",
+                    "gate 2/3 — signal at 0xFFF9DD61 out of [0x80, 0xB4]. "
+                        "Possibly battery-voltage decode; verify PSU at 13.5 V.",
+                    "gate 4 — counter at 0xFFF8D3DC is >= 4. "
+                        "Something is incrementing it; analyst will trace.",
+                    "gate 5 — fault counter at 0xFFF99835 > 0x05. "
+                        "Find increment site + clear path (ROM threshold at 0x00061A8E).",
+                    "gate 6 — current session is not 0x02/0x03. "
+                        "Send DSC 0x10 0x03 first to enter Extended, then retry DSC 0x10 0x02.",
+                };
+                std::fprintf(stdout, "%s\n", causes[i]);
+                diagnosed = true;
+                break;
+            }
+        }
+        if (!diagnosed) {
+            std::fputs("gates 1-5 all pass; if DSC 0x10 0x02 still NRC 0x22s, "
+                       "investigate the Extended->Programming transition (gate 7) "
+                       "and the handler tail.\n",
+                       stdout);
+        }
+        std::fputc('\n', stdout);
+        std::fflush(stdout);
+        return 0;
+    }
+
+    if (is_dsc_faults_preset) {
+        // Round-16 handoff §1: the gate-5 aggregator at ROM 0x00077E60
+        // ORs these 5 fault bits across 4 RAM bytes. If any bit is set,
+        // 0xFFF99835 gets written 0x0A. Report which bit(s) assert.
+        constexpr std::array<std::uint32_t, 4> fault_addrs{
+            0xFFF8917BU,  // F1: bit 1
+            0xFFF89212U,  // F2: bit 7
+            0xFFF88F49U,  // F3 + F4: bits 0 and 1 (same byte)
+            0xFFF89178U,  // F5: bit 0
+        };
+        std::vector<std::uint32_t> addrs;
+        addrs.reserve(fault_addrs.size());
+        for (auto a : fault_addrs)
+            addrs.push_back(a & 0x00FFFFFFU);
+        auto rd = ssm.read(addrs, std::chrono::milliseconds{3000});
+        if (!rd.has_value()) {
+            std::fprintf(stderr, "subaru-ram-snapshot: SSM-A8 read failed: %s\n",
+                         rd.error().to_string().c_str());
+            return 1;
+        }
+        auto const &v = *rd;
+        std::fputs("\nDSC gate 5 fault snapshot (round-16 function at ROM 0x00077E60)\n",
+                   stdout);
+        std::fputs("-----------------------------------------------------------------\n",
+                   stdout);
+
+        struct FaultBit {
+            char const   *label;
+            std::uint32_t addr;
+            std::uint8_t  value;
+            std::uint8_t  mask;
+            bool          asserted;
+        };
+        std::array<FaultBit, 5> f{{
+            {"F1", 0xFFF8917BU, v[0], 0x02U, (v[0] & 0x02U) != 0},   // bit 1
+            {"F2", 0xFFF89212U, v[1], 0x80U, (v[1] & 0x80U) != 0},   // bit 7
+            {"F3", 0xFFF88F49U, v[2], 0x01U, (v[2] & 0x01U) != 0},   // bit 0
+            {"F4", 0xFFF88F49U, v[2], 0x02U, (v[2] & 0x02U) != 0},   // bit 1
+            {"F5", 0xFFF89178U, v[3], 0x01U, (v[3] & 0x01U) != 0},   // bit 0
+        }};
+        int bit_of_mask[] = {1, 7, 0, 1, 0};
+
+        std::optional<std::size_t> first_asserted;
+        for (std::size_t i = 0; i < f.size(); ++i) {
+            std::fprintf(stdout, "  [%s] 0x%08X = 0x%02X  (bit %d: %s)\n",
+                         f[i].label, f[i].addr, f[i].value, bit_of_mask[i],
+                         f[i].asserted ? "SET" : "clear");
+            if (f[i].asserted && !first_asserted.has_value())
+                first_asserted = i;
+        }
+
+        std::fputc('\n', stdout);
+        if (first_asserted.has_value()) {
+            std::fprintf(stdout, "First asserted: %s (cell 0x%08X bit %d)\n",
+                         f[*first_asserted].label,
+                         f[*first_asserted].addr,
+                         bit_of_mask[*first_asserted]);
+        } else {
+            std::fputs("All 5 fault bits CLEAR.\n", stdout);
+            std::fputs("If 0xFFF99835 still reads 0x0A, the aggregator at ROM\n"
+                       "0x00077E60 isn't reaching the computed-value path —\n"
+                       "round-17 analyst trace required (caller / periodic\n"
+                       "dispatcher).\n",
+                       stdout);
+        }
+        std::fputc('\n', stdout);
+        std::fflush(stdout);
+        return 0;
+    }
+
+    if (is_dsc_fault_context_preset) {
+        // Round-17 handoff §3: 6 diagnostic cells, single multi-addr read.
+        // 0xFFF8BB0A is the high byte of a u16; we read the low byte too
+        // for completeness.
+        constexpr std::array<std::uint32_t, 7> ctx_addrs{
+            0xFFF88EC8U,  // F2/F3/F4 clearer gate (bit 0)
+            0xFFF99819U,  // F2-adjacent fault (cleared by same routine)
+            0xFFF89124U,  // adjacent fault byte
+            0xFFF8BB0AU,  // gate-5 computed-value input (u16 high)
+            0xFFF8BB0BU,  // gate-5 computed-value input (u16 low)
+            0xFFF8917BU,  // F1 byte (composite)
+            0xFFF89178U,  // F5 byte (passing — sanity)
+        };
+        std::vector<std::uint32_t> addrs;
+        addrs.reserve(ctx_addrs.size());
+        for (auto a : ctx_addrs)
+            addrs.push_back(a & 0x00FFFFFFU);
+        auto rd = ssm.read(addrs, std::chrono::milliseconds{3000});
+        if (!rd.has_value()) {
+            std::fprintf(stderr, "subaru-ram-snapshot: SSM-A8 read failed: %s\n",
+                         rd.error().to_string().c_str());
+            return 1;
+        }
+        auto const &v = *rd;
+        std::fputs("\nDSC gate-5 fault context (round-17 handoff §3)\n", stdout);
+        std::fputs("-----------------------------------------------\n", stdout);
+        bool const clearer_gate_open = (v[0] & 0x01U) != 0;
+        std::fprintf(stdout,
+                     "  [%s] 0xFFF88EC8 = 0x%02X  F2/F3/F4 clearer gate (bit 0: %s)\n",
+                     clearer_gate_open ? "OK" : "XX",
+                     v[0], clearer_gate_open ? "OPEN" : "CLOSED");
+        std::fprintf(stdout,
+                     "       0xFFF99819 = 0x%02X  F2-adjacent fault\n", v[1]);
+        std::fprintf(stdout,
+                     "       0xFFF89124 = 0x%02X  adjacent fault byte\n", v[2]);
+        std::uint16_t const u16 =
+            static_cast<std::uint16_t>(
+                (static_cast<std::uint16_t>(v[3]) << 8) | v[4]);
+        std::fprintf(stdout,
+                     "       0xFFF8BB0A = 0x%04X (u16 big-endian)  gate-5 "
+                     "computed-value input\n", u16);
+        std::fprintf(stdout,
+                     "       0xFFF8917B = 0x%02X  F1 byte (composite)\n", v[5]);
+        std::fprintf(stdout,
+                     "       0xFFF89178 = 0x%02X  F5 byte (sanity — should be 0x7E)\n",
+                     v[6]);
+        std::fputs("\nDiagnosis: ", stdout);
+        if (!clearer_gate_open) {
+            std::fputs("F2/F3/F4 clearer gate at 0xFFF88EC8 bit 0 is CLOSED.\n"
+                       "Round-17 §2.3: heartbeats + ClearDTC alone won't help; the\n"
+                       "clearer is structurally disabled on bench. Path C (UDS 0x3D\n"
+                       "force-write) is the analyst's round-18 next step. If 0x3D\n"
+                       "handler isn't accessible post-SA, bench is structurally\n"
+                       "walled for Phase C — pivot to user's car.\n",
+                       stdout);
+        } else {
+            std::fputs("F2/F3/F4 clearer gate at 0xFFF88EC8 bit 0 is OPEN — the\n"
+                       "clearer should be firing. If faults are still set, the\n"
+                       "clearer routine isn't being SCHEDULED (caller / periodic\n"
+                       "dispatcher issue). Send full context to analyst.\n",
+                       stdout);
+        }
+        std::fputc('\n', stdout);
+        std::fflush(stdout);
+        return 0;
+    }
+
+    for (auto const &r : regions) {
+        std::fprintf(stdout, "\n%s\n", r.label);
+        std::fputs("------------------------------------------\n", stdout);
+        std::vector<std::uint32_t> addrs;
+        addrs.reserve(r.count);
+        for (std::uint32_t i = 0; i < r.count; ++i) {
+            addrs.push_back((r.start + i) & 0x00FFFFFFU);
+        }
+        auto rd = ssm.read(addrs, std::chrono::milliseconds{3000});
+        if (!rd.has_value()) {
+            std::fprintf(stderr, "subaru-ram-snapshot: SSM-A8 read failed: %s\n",
+                         rd.error().to_string().c_str());
+            return 1;
+        }
+        auto const &vals = *rd;
+        for (std::size_t row = 0; row < vals.size(); row += 16) {
+            std::fprintf(stdout, "  0x%08X ", r.start + static_cast<std::uint32_t>(row));
+            std::size_t const end = std::min(row + 16, vals.size());
+            for (std::size_t i = row; i < end; ++i) {
+                std::fprintf(stdout, " %02X", vals[i]);
+            }
+            for (std::size_t i = end; i < row + 16; ++i)
+                std::fputs("   ", stdout);
+            std::fputs("  |", stdout);
+            for (std::size_t i = row; i < end; ++i) {
+                std::uint8_t const b = vals[i];
+                std::fputc((b >= 0x20 && b < 0x7F) ? static_cast<int>(b) : '.', stdout);
+            }
+            std::fputs("|\n", stdout);
+        }
+    }
+    std::fputc('\n', stdout);
+    std::fflush(stdout);
+    return 0;
+}
+
+// cmd_subaru_dsc_try — cold one-shot DSC 0x10 0x02 (ProgrammingSession)
+// over ISO-15765. No SA, no bus-quieting, no heartbeat injection. Use
+// this when the round-14 chain probe shows the writer gate already
+// open — the simplest test of whether the DSC handler is still gated
+// at all. Positive ack: round-14 §3.4 wall is fully collapsed. NRC
+// 0x22: a precondition we still don't see is active. NRC 0x12 / 0x7E:
+// firmware is rejecting the session byte itself. Any other NRC: novel
+// finding worth its own analyst handoff.
+int cmd_subaru_dsc_try(int argc, char *argv[]) {
+    std::optional<std::string> transport_kind;
+    std::string dll_path;
+    std::string device_path;
+    std::uint8_t session = 0x02;  // ProgrammingSession by default
+    bool verbose = false;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "subaru-dsc-try: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--transport") {
+            if (auto const *v = require_arg("--transport"); v)
+                transport_kind = std::string{v};
+            else
+                return 2;
+        } else if (a == "--device") {
+            if (auto const *v = require_arg("--device"); v)
+                device_path = v;
+            else
+                return 2;
+        } else if (a == "--dll") {
+            if (auto const *v = require_arg("--dll"); v)
+                dll_path = v;
+            else
+                return 2;
+        } else if (a == "--session") {
+            auto const *v = require_arg("--session");
+            if (v == nullptr)
+                return 2;
+            char *end = nullptr;
+            auto const val = std::strtoull(v, &end, 0);
+            if (end == v || *end != '\0' || val > 0xFFULL) {
+                std::fputs("subaru-dsc-try: --session must be a 0-255 hex (0x..) "
+                           "or decimal byte\n", stderr);
+                return 2;
+            }
+            session = static_cast<std::uint8_t>(val);
+        } else if (a == "--verbose") {
+            verbose = true;
+        } else {
+            std::fprintf(stderr, "subaru-dsc-try: unknown option: %s\n", argv[i]);
+            return 2;
+        }
+    }
+
+    if (!transport_kind.has_value()) {
+        std::fputs(
+            "subaru-dsc-try — cold one-shot DSC 0x10 <sub> over ISO-15765.\n"
+            "\n"
+            "No SA, no bus-quieting, no heartbeats. The simplest possible\n"
+            "DiagnosticSessionControl request. Default --session 0x02\n"
+            "(ProgrammingSession). Run when the round-14 chain probe shows\n"
+            "the writer gate open to test whether DSC entry is still gated.\n"
+            "\n"
+            "Usage:\n"
+            "  subuwutuner-cli subaru-dsc-try --transport obdx --device COM4 \\\n"
+            "      [--session 0x02] [--verbose]\n",
+            stderr);
+        return 2;
+    }
+
+    auto const kind = st::transport::parse_kind(*transport_kind);
+    if (!kind.has_value()) {
+        std::fprintf(stderr, "subaru-dsc-try: --transport '%s' not recognized\n",
+                     transport_kind->c_str());
+        return 2;
+    }
+    st::transport::TransportSpec const spec{*kind, dll_path, device_path};
+    auto t = st::transport::open_transport(spec);
+    if (!t.has_value()) {
+        std::fprintf(stderr, "subaru-dsc-try: %s\n", t.error().to_string().c_str());
+        return 1;
+    }
+    if (verbose)
+        st::transport::obdx::set_trace_enabled(true);
+    st::transport::LinkConfig const link{st::transport::LinkKind::CanIso15765, 500000,
+                                         0x000007E0, 0x000007E8};
+    if (auto s = (*t)->open(link); !s.has_value()) {
+        std::fprintf(stderr, "subaru-dsc-try: transport open failed: %s\n",
+                     s.error().to_string().c_str());
+        return 1;
+    }
+
+    st::ecu::uds::UdsClient client{**t};
+    std::fprintf(stdout, "subaru-dsc-try: sending DSC 0x10 0x%02X (cold, no prelude)...\n",
+                 session);
+    auto const status = client.diagnostic_session_control(
+        session, std::chrono::milliseconds{2000});
+    if (status.has_value()) {
+        std::fprintf(stdout, "\nDSC 0x10 0x%02X = POSITIVE RESPONSE.\n", session);
+        if (session == 0x02) {
+            std::fputs("Session entered. Round-14 §3.4 'wall is upstream of CAN'\n"
+                       "hypothesis is fully refuted — Programming preconditions\n"
+                       "have collapsed entirely.\n",
+                       stdout);
+        } else if (session == 0x03) {
+            std::fputs("ExtendedDiagnostic is freely accessible. If DSC 0x02\n"
+                       "still NRC 0x22s, the precondition is specific to\n"
+                       "ProgrammingSession (flash-enable handshake gate), not\n"
+                       "a global access lockout.\n",
+                       stdout);
+        }
+        return 0;
+    }
+    auto const err = status.error().to_string();
+    std::fprintf(stdout, "\nDSC 0x10 0x%02X = FAILED: %s\n", session, err.c_str());
+    if (err.find("0x22") != std::string::npos ||
+        err.find("conditionsNotCorrect") != std::string::npos ||
+        err.find("ConditionsNotCorrect") != std::string::npos) {
+        std::fputs("\n  NRC 0x22 (conditionsNotCorrect): a precondition is still\n"
+                   "  active that the round-14 chain probe didn't expose. Next:\n"
+                   "  dump the full bitmap region 0xFFF8A6CE..EC and surrounding\n"
+                   "  state bytes (0xFFF891B0..B8) to find what else might gate it.\n",
+                   stdout);
+    } else if (err.find("0x12") != std::string::npos) {
+        std::fputs("\n  NRC 0x12 (subFunctionNotSupported): firmware does not accept\n"
+                   "  this session sub-function. Try --session 0x03 (Extended) for\n"
+                   "  a sanity check, then revisit which session byte COBB actually\n"
+                   "  uses on the wire (memory cobb_install_flow_decoded).\n",
+                   stdout);
+    } else if (err.find("0x7E") != std::string::npos) {
+        std::fputs("\n  NRC 0x7E (subFunctionNotSupportedInActiveSession): session\n"
+                   "  byte was rejected because the ECU isn't in a parent session\n"
+                   "  that allows the transition. Try Extended (0x03) first then\n"
+                   "  retry Programming (0x02).\n",
+                   stdout);
+    } else if (err.find("0x33") != std::string::npos) {
+        std::fputs("\n  NRC 0x33 (securityAccessDenied): firmware wants SA before\n"
+                   "  even entertaining the DSC. Run with --sa-variant via\n"
+                   "  flash-apply, not this minimal verb.\n",
+                   stdout);
+    } else {
+        std::fputs("\n  Unexpected NRC / error class. Capture --verbose USB trace\n"
+                   "  and route to analyst session for a fresh handoff.\n",
+                   stdout);
+    }
+    return 1;
+}
+
+// cmd_subaru_dsc_unblock_sequence — round-16 §2 single-transport
+// sequence that holds one connection across DSC 0x10 0x03 → SA L1 →
+// snapshot dsc-programming + dsc-faults → DSC 0x10 0x02. Round-15 §4
+// documented that CLI invocations lose session between calls; this
+// verb is the in-session fix.
+//
+// Returns 0 if final DSC 0x10 0x02 grants (Phase C OPEN); 1 otherwise.
+int cmd_subaru_dsc_unblock_sequence(int argc, char *argv[]) {
+    std::optional<std::string> transport_kind;
+    std::string dll_path;
+    std::string device_path;
+    bool no_sa = false;
+    bool with_clear_dtc = false;
+    bool with_heartbeats = false;
+    std::chrono::milliseconds heartbeat_duration{2000};
+    bool write_gate_byte = false;
+    bool burst_write = false;
+    bool burst_write_extended = false;
+    bool verbose = false;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr,
+                             "subaru-dsc-unblock-sequence: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--transport") {
+            if (auto const *v = require_arg("--transport"); v)
+                transport_kind = std::string{v};
+            else
+                return 2;
+        } else if (a == "--device") {
+            if (auto const *v = require_arg("--device"); v)
+                device_path = v;
+            else
+                return 2;
+        } else if (a == "--dll") {
+            if (auto const *v = require_arg("--dll"); v)
+                dll_path = v;
+            else
+                return 2;
+        } else if (a == "--no-sa") {
+            no_sa = true;
+        } else if (a == "--with-clear-dtc") {
+            with_clear_dtc = true;
+        } else if (a == "--write-gate-byte") {
+            write_gate_byte = true;
+        } else if (a == "--burst-write") {
+            burst_write = true;
+        } else if (a == "--burst-write-extended") {
+            burst_write = true;
+            burst_write_extended = true;
+        } else if (a == "--with-heartbeats") {
+            with_heartbeats = true;
+        } else if (a == "--heartbeat-duration-ms") {
+            auto const *v = require_arg("--heartbeat-duration-ms");
+            if (v == nullptr)
+                return 2;
+            char *end = nullptr;
+            auto const val = std::strtoull(v, &end, 10);
+            if (end == v || *end != '\0' || val < 100ULL || val > 10000ULL) {
+                std::fputs("subaru-dsc-unblock-sequence: --heartbeat-duration-ms "
+                           "must be 100..10000\n", stderr);
+                return 2;
+            }
+            heartbeat_duration =
+                std::chrono::milliseconds{static_cast<std::int64_t>(val)};
+        } else if (a == "--verbose") {
+            verbose = true;
+        } else {
+            std::fprintf(stderr,
+                         "subaru-dsc-unblock-sequence: unknown option: %s\n", argv[i]);
+            return 2;
+        }
+    }
+
+    if (!transport_kind.has_value()) {
+        std::fputs(
+            "subaru-dsc-unblock-sequence — round-16 §2 single-transport unblock.\n"
+            "\n"
+            "Holds one transport open across the entire DSC 0x10 0x02 unblock\n"
+            "sequence so session state and SA grant persist across the calls:\n"
+            "  1. DSC 0x10 0x03 (Extended)\n"
+            "  2. SA L1 (Subaru aftermarket-l1)\n"
+            "  3. Snapshot the round-15 dsc-programming gates\n"
+            "  4. Snapshot the round-16 dsc-faults bits\n"
+            "  5. DSC 0x10 0x02 (Programming)\n"
+            "\n"
+            "Exit 0 = step 5 positive (Phase C OPEN); 1 = any step failed.\n"
+            "\n"
+            "Round-17 escape paths (try in order):\n"
+            "  --with-clear-dtc  Path A: send UDS 0x14 0xFF 0xFF 0xFF (ClearDTCs)\n"
+            "                    after SA, before snapshots. (Bench-tested: this\n"
+            "                    firmware does NOT respond to UDS 0x14 on either\n"
+            "                    physical or functional addressing.)\n"
+            "  --with-heartbeats Path B: inject 8 vehicle-presence CAN frames\n"
+            "                    (round-13 §4.3 set) into OBDX periodic slots for\n"
+            "                    --heartbeat-duration-ms (default 2000 ms) before\n"
+            "                    DSC entry, then keep them running until exit.\n"
+            "                    Resets comm-fault timeout counters → F2/F3/F4\n"
+            "                    clearer at ROM 0x00088504 fires.\n"
+            "  --write-gate-byte Path C: send UDS 3D 14 FF F8 8E C8 01 01 after SA\n"
+            "                    (RMBA write of 0x01 to 0xFFF88EC8 — the F2/F3/F4\n"
+            "                    clearer's gate). Handler at ROM 0x000BEAC0\n"
+            "                    (slot 15, shared SID 0x23/0x3D). Round-18 §4.\n"
+            "  --burst-write     Path E (round-19): 3-write UDS 0x3D burst —\n"
+            "                    cancel flags 0xFFF88950..52, F2 byte 0xFFF89212\n"
+            "                    = 0, clearer gate 0xFFF88EC8 = 1. Bypasses the\n"
+            "                    F3-cascade-from-F2 race. Sleep 100 ms, then DSC.\n"
+            "  --burst-write-extended\n"
+            "                    Round-19 §2.1 fallback: 5-write burst (adds\n"
+            "                    cancel flags D/E and preemptive write of F3/F4\n"
+            "                    byte 0xFFF88F49 = 0). Use if --burst-write fails.\n"
+            "\n"
+            "Usage:\n"
+            "  subuwutuner-cli subaru-dsc-unblock-sequence \\\n"
+            "      --transport obdx --device COM4 \\\n"
+            "      [--no-sa] [--with-clear-dtc] \\\n"
+            "      [--with-heartbeats [--heartbeat-duration-ms N]] \\\n"
+            "      [--verbose]\n",
+            stderr);
+        return 2;
+    }
+
+    auto const kind = st::transport::parse_kind(*transport_kind);
+    if (!kind.has_value()) {
+        std::fprintf(stderr,
+                     "subaru-dsc-unblock-sequence: --transport '%s' not recognized\n",
+                     transport_kind->c_str());
+        return 2;
+    }
+    st::transport::TransportSpec const spec{*kind, dll_path, device_path};
+    auto t = st::transport::open_transport(spec);
+    if (!t.has_value()) {
+        std::fprintf(stderr, "subaru-dsc-unblock-sequence: %s\n",
+                     t.error().to_string().c_str());
+        return 1;
+    }
+    if (verbose)
+        st::transport::obdx::set_trace_enabled(true);
+    st::transport::LinkConfig const link{st::transport::LinkKind::CanIso15765, 500000,
+                                         0x000007E0, 0x000007E8};
+    if (auto s = (*t)->open(link); !s.has_value()) {
+        std::fprintf(stderr,
+                     "subaru-dsc-unblock-sequence: transport open failed: %s\n",
+                     s.error().to_string().c_str());
+        return 1;
+    }
+
+    st::ecu::uds::UdsClient uds{**t};
+    st::ecu::ssm::SsmClient ssm{**t, st::ecu::ssm::Framing::IsoTp};
+
+    // Round-17 Path B — vehicle-presence heartbeat injection. Reuses the
+    // round-13 §4.3 / round-14 corrected set the existing
+    // subaru-presence-test verb uses. Periodic slots stay enabled until
+    // verb exit (clear_all_periodic_slots on every return path below).
+    struct HeartbeatTeardown {
+        st::transport::ITransport *transport;
+        bool armed{false};
+        ~HeartbeatTeardown() {
+            if (armed && transport)
+                (void)transport->clear_all_periodic_slots();
+        }
+    };
+    HeartbeatTeardown hb_teardown{(*t).get(), false};
+
+    if (with_heartbeats) {
+        if (!(*t)->supports_periodic_slots()) {
+            std::fputs(
+                "subaru-dsc-unblock-sequence: --with-heartbeats: transport does "
+                "not support periodic slots\n", stderr);
+            return 1;
+        }
+        struct HeartbeatFrame {
+            std::uint32_t can_id;
+            std::array<std::uint8_t, 8> data;
+            std::uint16_t interval_ms;
+        };
+        // Round-13 §4.3 corrected vehicle-presence set, same as
+        // subaru-presence-test. 8 frames, in-filter-table IDs only.
+        std::array<HeartbeatFrame, 8> const frames{{
+            {0x144, {0xC0, 0x00, 0x05, 0x00, 0x00, 0x24, 0xA0, 0x00}, 40},
+            {0x280, {0x00, 0x01, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00}, 40},
+            {0x0D0, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, 20},
+            {0x0D1, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, 20},
+            {0x0D3, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, 20},
+            {0x282, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, 40},
+            {0x360, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, 40},
+            {0x451, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, 40},
+        }};
+        std::fprintf(stdout,
+                     "\n[0/5] Heartbeat injection (8 slots) for %lld ms...\n",
+                     heartbeat_duration.count());
+        std::fflush(stdout);
+        for (std::uint8_t slot = 0; slot < frames.size(); ++slot) {
+            st::transport::ITransport::PeriodicSlot ps{};
+            ps.index = slot;
+            ps.can_id = frames[slot].can_id;
+            ps.data = std::span<std::uint8_t const>{frames[slot].data};
+            ps.interval_ms = frames[slot].interval_ms;
+            if (auto s = (*t)->set_periodic_slot(ps); !s.has_value()) {
+                std::fprintf(stderr,
+                             "      set_periodic_slot[%u] FAILED: %s\n",
+                             slot, s.error().to_string().c_str());
+                return 1;
+            }
+            if (auto s = (*t)->enable_periodic_slot(slot, true); !s.has_value()) {
+                std::fprintf(stderr,
+                             "      enable_periodic_slot[%u] FAILED: %s\n",
+                             slot, s.error().to_string().c_str());
+                return 1;
+            }
+        }
+        hb_teardown.armed = true;
+        std::this_thread::sleep_for(heartbeat_duration);
+        std::fputs("      8 slots active (0x144/0x280/0x0D0/0x0D1/0x0D3/"
+                   "0x282/0x360/0x451); continuing with DSC + SA.\n",
+                   stdout);
+    }
+
+    // Step 1 — Extended
+    std::fputs("\n[1/5] DSC 0x10 0x03 (Extended)...\n", stdout);
+    if (auto s = uds.diagnostic_session_control(0x03, std::chrono::milliseconds{2000});
+        !s.has_value()) {
+        std::fprintf(stderr,
+                     "      FAILED: %s\n",
+                     s.error().to_string().c_str());
+        return 1;
+    }
+    std::fputs("      OK (50 03).\n", stdout);
+
+    // Step 2 — SA L1 (aftermarket variant — matches bench memory note)
+    if (!no_sa) {
+        std::fputs("\n[2/5] SA L1 (aftermarket-l1)...\n", stdout);
+        auto seed = uds.security_access_request_seed(0x01,
+                                                     std::chrono::milliseconds{1500});
+        if (!seed.has_value()) {
+            std::fprintf(stderr, "      requestSeed FAILED: %s\n",
+                         seed.error().to_string().c_str());
+            return 1;
+        }
+        auto key = st::ecu::subaru::ssmcan1_l1_aftermarket(*seed);
+        if (!key.has_value()) {
+            std::fprintf(stderr, "      key derivation FAILED: %s\n",
+                         key.error().to_string().c_str());
+            return 1;
+        }
+        if (auto s = uds.security_access_send_key(0x02, *key,
+                                                   std::chrono::milliseconds{1500});
+            !s.has_value()) {
+            std::fprintf(stderr, "      sendKey FAILED: %s\n",
+                         s.error().to_string().c_str());
+            return 1;
+        }
+        std::fputs("      OK (67 02).\n", stdout);
+    } else {
+        std::fputs("\n[2/5] SA L1 SKIPPED (--no-sa).\n", stdout);
+    }
+
+    // Round-17 Path A — UDS 0x14 (ClearDTCs, group 0xFFFFFF = all) inside
+    // the SA-held session. Aim: clear F2/F3/F4 by triggering the routine
+    // at ROM 0x00088504..0x000885A0 (round-17 analyst handoff §1.1).
+    if (with_clear_dtc) {
+        std::fputs("\n[2b]  UDS 0x14 0xFF 0xFF 0xFF (ClearDTCs, all groups)...\n",
+                   stdout);
+        std::fflush(stdout);
+        constexpr std::array<std::uint8_t, 4> clear_req{0x14U, 0xFFU, 0xFFU, 0xFFU};
+        // Real ClearDTC can stall multi-second on flash writes; ISO-TP 0x78
+        // (responsePending) gets swallowed by the OBDX layer.
+        auto resp = (*t)->send_recv(std::span<std::uint8_t const>{clear_req},
+                                    std::chrono::milliseconds{5000});
+        if (!resp.has_value()) {
+            std::fprintf(stdout,
+                         "      physical 0x7E0 path: %s\n"
+                         "      retrying via functional 0x7DF...\n",
+                         resp.error().to_string().c_str());
+            std::fflush(stdout);
+            auto resp2 = (*t)->send_recv_to(0x000007DFU,
+                                            std::span<std::uint8_t const>{clear_req},
+                                            std::chrono::milliseconds{5000});
+            if (!resp2.has_value()) {
+                std::fprintf(stdout,
+                             "      functional 0x7DF path: %s\n"
+                             "      ClearDTCs not accepted; continuing — snapshots\n"
+                             "      will confirm faults still set.\n",
+                             resp2.error().to_string().c_str());
+            } else {
+                resp = std::move(resp2);
+            }
+        }
+        if (resp.has_value()) {
+            auto const &body = resp->data;
+            if (body.empty()) {
+                std::fputs("      empty response; continuing.\n", stdout);
+            } else if (body[0] == 0x54U) {
+                std::fputs("      OK (54).\n", stdout);
+            } else if (body.size() >= 3 && body[0] == 0x7FU && body[1] == 0x14U) {
+                std::fprintf(stdout,
+                             "      NEGATIVE: NRC 0x%02X (continuing — snapshots\n"
+                             "      will show whether faults cleared anyway).\n",
+                             body[2]);
+            } else {
+                std::fprintf(stdout,
+                             "      UNEXPECTED response (first byte 0x%02X); "
+                             "continuing.\n",
+                             body[0]);
+            }
+        }
+    }
+
+    // Step 3 — DSC-programming gates snapshot (round-15 cells)
+    std::fputs("\n[3/5] DSC-programming gates snapshot...\n", stdout);
+    constexpr std::array<std::uint32_t, 6> prog_addrs{
+        0xFFF99A7EU, 0xFFF9DD61U, 0xFFF8D3DCU,
+        0xFFF99835U, 0xFFF9B853U, 0xFFF9B854U,
+    };
+    std::vector<std::uint32_t> p_addrs;
+    p_addrs.reserve(prog_addrs.size());
+    for (auto a : prog_addrs)
+        p_addrs.push_back(a & 0x00FFFFFFU);
+    auto p_read = ssm.read(p_addrs, std::chrono::milliseconds{2000});
+    if (!p_read.has_value()) {
+        std::fprintf(stderr, "      SSM-A8 read FAILED: %s\n",
+                     p_read.error().to_string().c_str());
+        return 1;
+    }
+    auto const &p = *p_read;
+    bool const g1 = (p[0] & 0x80U) != 0;
+    bool const g23 = p[1] >= 0x80U && p[1] <= 0xB4U;
+    bool const g4 = p[2] < 4U;
+    bool const g5 = p[3] <= 0x05U;
+    bool const g6 = p[4] == 0x02U || p[4] == 0x03U;
+    bool const g7 = p[5] == 0x01U;
+    std::fprintf(stdout,
+                 "      [%s] gate 1  0xFFF99A7E = 0x%02X  (bit 7 %s)\n"
+                 "      [%s] gate 2  0xFFF9DD61 = 0x%02X  (in [0x80,0xB4]: %s)\n"
+                 "      [%s] gate 3  0xFFF8D3DC = 0x%02X  (< 4: %s)\n"
+                 "      [%s] gate 4  0xFFF99835 = 0x%02X  (<= 0x05: %s)\n"
+                 "      [%s] gate 5  0xFFF9B853 = 0x%02X  (== 0x02/0x03: %s)\n"
+                 "      [%s] gate 6  0xFFF9B854 = 0x%02X  (== 0x01: %s)\n",
+                 g1  ? "OK" : "XX", p[0], g1  ? "set"  : "CLEAR",
+                 g23 ? "OK" : "XX", p[1], g23 ? "yes"  : "NO",
+                 g4  ? "OK" : "XX", p[2], g4  ? "yes"  : "NO",
+                 g5  ? "OK" : "XX", p[3], g5  ? "yes"  : "NO",
+                 g6  ? "OK" : "XX", p[4], g6  ? "yes"  : "NO",
+                 g7  ? "OK" : "XX", p[5], g7  ? "yes"  : "NO");
+
+    // Step 4 — fault-bits snapshot (round-16 cells)
+    std::fputs("\n[4/5] DSC-faults snapshot...\n", stdout);
+    constexpr std::array<std::uint32_t, 4> fault_addrs{
+        0xFFF8917BU, 0xFFF89212U, 0xFFF88F49U, 0xFFF89178U,
+    };
+    std::vector<std::uint32_t> f_addrs;
+    f_addrs.reserve(fault_addrs.size());
+    for (auto a : fault_addrs)
+        f_addrs.push_back(a & 0x00FFFFFFU);
+    auto f_read = ssm.read(f_addrs, std::chrono::milliseconds{2000});
+    if (!f_read.has_value()) {
+        std::fprintf(stderr, "      SSM-A8 read FAILED: %s\n",
+                     f_read.error().to_string().c_str());
+        return 1;
+    }
+    auto const &fv = *f_read;
+    bool const F1 = (fv[0] & 0x02U) != 0;
+    bool const F2 = (fv[1] & 0x80U) != 0;
+    bool const F3 = (fv[2] & 0x01U) != 0;
+    bool const F4 = (fv[2] & 0x02U) != 0;
+    bool const F5 = (fv[3] & 0x01U) != 0;
+    std::fprintf(stdout,
+                 "      [F1] 0xFFF8917B = 0x%02X  (bit 1: %s)\n"
+                 "      [F2] 0xFFF89212 = 0x%02X  (bit 7: %s)\n"
+                 "      [F3] 0xFFF88F49 = 0x%02X  (bit 0: %s)\n"
+                 "      [F4] 0xFFF88F49 = 0x%02X  (bit 1: %s)\n"
+                 "      [F5] 0xFFF89178 = 0x%02X  (bit 0: %s)\n",
+                 fv[0], F1 ? "SET" : "clear",
+                 fv[1], F2 ? "SET" : "clear",
+                 fv[2], F3 ? "SET" : "clear",
+                 fv[2], F4 ? "SET" : "clear",
+                 fv[3], F5 ? "SET" : "clear");
+
+    // Round-19 Path E — multi-write UDS 0x3D burst that preempts the
+    // F3 setter chain. F2 cascades into F3 within 20 ms, so a sole
+    // 0xFFF88EC8 write (Path C) leaves F3 stuck. Path E writes the
+    // F3 cancel flags + F2 byte + (optional) F3/F4 byte + clearer gate
+    // back-to-back, then sleeps for the aggregator tick. ~30-50 LOC.
+    if (burst_write) {
+        std::fprintf(stdout,
+                     "\n[4a]  Path E burst-write (%s variant)...\n",
+                     burst_write_extended ? "extended 5-write" : "fast 3-write");
+        std::fflush(stdout);
+
+        struct BurstWrite {
+            char const   *label;
+            std::array<std::uint8_t, 11> bytes;
+            std::uint8_t  len;  // bytes actually used
+        };
+        // Fast 3-write set (round-19 §1.1)
+        constexpr BurstWrite write_a{
+            "cancel flags 0xFFF88950..52 = 01 01 01",
+            {0x3DU, 0x14U, 0xFFU, 0xF8U, 0x89U, 0x50U, 0x03U, 0x01U, 0x01U, 0x01U, 0x00U},
+            10};
+        constexpr BurstWrite write_b{
+            "F2 byte 0xFFF89212 = 0x00",
+            {0x3DU, 0x14U, 0xFFU, 0xF8U, 0x92U, 0x12U, 0x01U, 0x00U, 0x00U, 0x00U, 0x00U},
+            8};
+        constexpr BurstWrite write_c{
+            "clearer gate 0xFFF88EC8 = 0x01",
+            {0x3DU, 0x14U, 0xFFU, 0xF8U, 0x8EU, 0xC8U, 0x01U, 0x01U, 0x00U, 0x00U, 0x00U},
+            8};
+        // Extended adds D (cancel flags D/E) and E (F3/F4 byte preempt).
+        constexpr BurstWrite write_d{
+            "cancel flags 0xFFF88958..59 = 01 01",
+            {0x3DU, 0x14U, 0xFFU, 0xF8U, 0x89U, 0x58U, 0x02U, 0x01U, 0x01U, 0x00U, 0x00U},
+            9};
+        constexpr BurstWrite write_e{
+            "F3/F4 byte 0xFFF88F49 = 0x00",
+            {0x3DU, 0x14U, 0xFFU, 0xF8U, 0x8FU, 0x49U, 0x01U, 0x00U, 0x00U, 0x00U, 0x00U},
+            8};
+
+        std::vector<BurstWrite> sequence;
+        if (burst_write_extended) {
+            sequence = {write_a, write_d, write_b, write_e, write_c};
+        } else {
+            sequence = {write_a, write_b, write_c};
+        }
+
+        for (std::size_t i = 0; i < sequence.size(); ++i) {
+            auto const &w = sequence[i];
+            std::fprintf(stdout, "      [%zu/%zu] %s ... ",
+                         i + 1, sequence.size(), w.label);
+            std::fflush(stdout);
+            std::span<std::uint8_t const> payload{w.bytes.data(), w.len};
+            auto resp = (*t)->send_recv(payload, std::chrono::milliseconds{2000});
+            if (!resp.has_value()) {
+                std::fprintf(stdout, "transport: %s\n",
+                             resp.error().to_string().c_str());
+                std::fputs("      Path E aborted; remaining writes skipped.\n",
+                           stdout);
+                break;
+            }
+            auto const &body = resp->data;
+            if (!body.empty() && body[0] == 0x7DU) {
+                std::fputs("OK (7D)\n", stdout);
+            } else if (body.size() >= 3 && body[0] == 0x7FU && body[1] == 0x3DU) {
+                std::fprintf(stdout, "NRC 0x%02X\n", body[2]);
+                std::fputs("      Path E write failed; aborting remaining writes.\n",
+                           stdout);
+                break;
+            } else if (!body.empty()) {
+                std::fprintf(stdout, "unexpected 0x%02X\n", body[0]);
+            } else {
+                std::fputs("empty response\n", stdout);
+            }
+        }
+
+        // Race the aggregator: tight poll of 0xFFF99835 for up to 500 ms.
+        // If it drops ≤ 0x05 in any sampled moment, fire DSC immediately —
+        // the aggregator may briefly catch F3 clear between F3 setter
+        // ticks. If it never drops, fall through to standard snapshot.
+        std::fputs("      Racing the aggregator (polling 0xFFF99835)...\n",
+                   stdout);
+        constexpr std::array<std::uint32_t, 1> race_g4{0x00F99835U};
+        bool aggregator_caught_window = false;
+        std::chrono::milliseconds best_seen{};
+        std::uint8_t best_value = 0xFFU;
+        auto race_start = std::chrono::steady_clock::now();
+        while (true) {
+            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - race_start);
+            if (elapsed >= std::chrono::milliseconds{500})
+                break;
+            auto r = ssm.read(race_g4, std::chrono::milliseconds{800});
+            if (!r.has_value())
+                break;
+            std::uint8_t const v = (*r)[0];
+            if (v < best_value) {
+                best_value = v;
+                best_seen = elapsed;
+            }
+            if (v <= 0x05U) {
+                std::fprintf(stdout,
+                             "      → 0xFFF99835 = 0x%02X at t=%lldms — DSC NOW!\n",
+                             v, elapsed.count());
+                aggregator_caught_window = true;
+                break;
+            }
+        }
+        if (!aggregator_caught_window) {
+            std::fprintf(stdout,
+                         "      0xFFF99835 stayed > 0x05 across 500 ms "
+                         "(best seen: 0x%02X at t=%lldms).\n",
+                         best_value, best_seen.count());
+        }
+
+        // Post-burst snapshot of the gate-4 read target and the
+        // fault bytes — confirms whether the cascade was preempted.
+        std::fputs("\n[4a.1] Post-burst snapshot...\n", stdout);
+        constexpr std::array<std::uint32_t, 5> post_addrs{
+            0x00F99835U,  // gate 4 read target
+            0x00F8917BU,  // F1
+            0x00F89212U,  // F2
+            0x00F88F49U,  // F3 + F4
+            0x00F88EC8U,  // clearer gate
+        };
+        std::vector<std::uint32_t> burst_post_addrs;
+        burst_post_addrs.reserve(post_addrs.size());
+        for (auto a : post_addrs)
+            burst_post_addrs.push_back(a);
+        auto rd = ssm.read(burst_post_addrs, std::chrono::milliseconds{2000});
+        if (rd.has_value()) {
+            auto const &v = *rd;
+            bool const g4_ok = v[0] <= 0x05U;
+            std::fprintf(stdout,
+                         "      [%s] 0xFFF99835 = 0x%02X  (<= 0x05: %s)\n"
+                         "           0xFFF8917B = 0x%02X  (F1 bit 1: %s)\n"
+                         "           0xFFF89212 = 0x%02X  (F2 bit 7: %s)\n"
+                         "           0xFFF88F49 = 0x%02X  (F3 bit 0: %s, "
+                         "F4 bit 1: %s)\n"
+                         "           0xFFF88EC8 = 0x%02X  (clearer gate: %s)\n",
+                         g4_ok ? "OK" : "XX", v[0], g4_ok ? "yes" : "NO",
+                         v[1], (v[1] & 0x02U) ? "SET" : "clear",
+                         v[2], (v[2] & 0x80U) ? "SET" : "clear",
+                         v[3],
+                         (v[3] & 0x01U) ? "SET" : "clear",
+                         (v[3] & 0x02U) ? "SET" : "clear",
+                         v[4], (v[4] & 0x01U) ? "OPEN" : "CLOSED");
+        }
+    }
+
+    // Round-18 Path C — RMBA write of *0xFFF88EC8 |= 0x01 via UDS 0x3D.
+    // Forces the F2/F3/F4 clearer's gate open so the periodic clearer at
+    // ROM 0x00088504 can fire. Wire bytes: SID 0x3D + ALFID 0x14 (addr-4 +
+    // length-1) + 4-byte big-endian address + 1-byte length + 1-byte data.
+    // Per round-18 §4 + §4.2 timing.
+    if (write_gate_byte && !burst_write) {
+        std::fputs("\n[4a]  UDS 0x3D write to 0xFFF88EC8 (Path C — clearer-gate "
+                   "RMBA force)...\n",
+                   stdout);
+        std::fflush(stdout);
+        constexpr std::array<std::uint8_t, 8> wmba_req{
+            0x3DU, 0x14U, 0xFFU, 0xF8U, 0x8EU, 0xC8U, 0x01U, 0x01U};
+        auto resp = (*t)->send_recv(std::span<std::uint8_t const>{wmba_req},
+                                    std::chrono::milliseconds{2000});
+        if (!resp.has_value()) {
+            std::fprintf(stdout, "      transport timeout: %s\n",
+                         resp.error().to_string().c_str());
+        } else {
+            auto const &body = resp->data;
+            if (body.empty()) {
+                std::fputs("      empty response.\n", stdout);
+            } else if (body[0] == 0x7DU) {
+                std::fputs("      OK (7D) — write accepted.\n", stdout);
+            } else if (body.size() >= 3 && body[0] == 0x7FU && body[1] == 0x3DU) {
+                char const *nrc_hint =
+                    body[2] == 0x33U ? "securityAccessDenied — try higher SA level (round-19)" :
+                    body[2] == 0x31U ? "requestOutOfRange — verify address byte order" :
+                    body[2] == 0x22U ? "conditionsNotCorrect — additional preconditions inside handler" :
+                    body[2] == 0x11U ? "serviceNotSupported — analyst slot-15 reading wrong" :
+                    body[2] == 0x13U ? "incorrectMessageLength — ALFID/payload mismatch" :
+                                       "(unknown)";
+                std::fprintf(stdout, "      NEGATIVE: NRC 0x%02X — %s.\n",
+                             body[2], nrc_hint);
+            } else {
+                std::fprintf(stdout,
+                             "      UNEXPECTED response (first byte 0x%02X); "
+                             "continuing.\n",
+                             body[0]);
+            }
+        }
+        // Per round-18 §4.2 step 6: let the periodic clearer tick.
+        std::this_thread::sleep_for(std::chrono::milliseconds{100});
+
+        // Re-snapshot dsc-faults to verify F-bits cleared.
+        std::fputs("\n[4a.1] Post-RMBA dsc-faults snapshot...\n", stdout);
+        constexpr std::array<std::uint32_t, 4> fault_addrs_post{
+            0xFFF8917BU, 0xFFF89212U, 0xFFF88F49U, 0xFFF89178U,
+        };
+        std::vector<std::uint32_t> f2_addrs;
+        f2_addrs.reserve(fault_addrs_post.size());
+        for (auto a : fault_addrs_post)
+            f2_addrs.push_back(a & 0x00FFFFFFU);
+        auto f2_read = ssm.read(f2_addrs, std::chrono::milliseconds{2000});
+        if (!f2_read.has_value()) {
+            std::fprintf(stderr, "      SSM-A8 read FAILED: %s\n",
+                         f2_read.error().to_string().c_str());
+            return 1;
+        }
+        auto const &f2 = *f2_read;
+        bool const pF1 = (f2[0] & 0x02U) != 0;
+        bool const pF2 = (f2[1] & 0x80U) != 0;
+        bool const pF3 = (f2[2] & 0x01U) != 0;
+        bool const pF4 = (f2[2] & 0x02U) != 0;
+        bool const pF5 = (f2[3] & 0x01U) != 0;
+        std::fprintf(stdout,
+                     "      [F1] 0xFFF8917B = 0x%02X  (bit 1: %s)\n"
+                     "      [F2] 0xFFF89212 = 0x%02X  (bit 7: %s)\n"
+                     "      [F3] 0xFFF88F49 = 0x%02X  (bit 0: %s)\n"
+                     "      [F4] 0xFFF88F49 = 0x%02X  (bit 1: %s)\n"
+                     "      [F5] 0xFFF89178 = 0x%02X  (bit 0: %s)\n",
+                     f2[0], pF1 ? "SET" : "clear",
+                     f2[1], pF2 ? "SET" : "clear",
+                     f2[2], pF3 ? "SET" : "clear",
+                     f2[2], pF4 ? "SET" : "clear",
+                     f2[3], pF5 ? "SET" : "clear");
+
+        // Re-read 0xFFF99835 (gate 4) to see if it dropped to the
+        // computed-value path.
+        constexpr std::array<std::uint32_t, 1> g4_addrs{0x00F99835U};
+        auto g4_read = ssm.read(g4_addrs, std::chrono::milliseconds{1000});
+        bool gate4_already_clear = false;
+        if (g4_read.has_value()) {
+            bool const passes = (*g4_read)[0] <= 0x05U;
+            std::fprintf(stdout,
+                         "      [%s] 0xFFF99835 = 0x%02X  (<= 0x05: %s)\n",
+                         passes ? "OK" : "XX", (*g4_read)[0],
+                         passes ? "yes" : "NO");
+            gate4_already_clear = passes;
+        }
+
+        // If the clearer didn't fully clear the gate-5 aggregator output,
+        // try two fallback writes in order:
+        //   Approach A: directly write 0xFFF99835. May fail NRC 0x31 if the
+        //               address is out of the WMBA-allowed range.
+        //   Approach B: clear F3 (bit 0 of 0xFFF88F49) — the clearer routine
+        //               doesn't touch F3 on this firmware (bench evidence:
+        //               F1/F2/F4/F5 cleared, F3 stayed). Force-clear it via
+        //               RMBA, then race the aggregator with a small sleep.
+        if (!gate4_already_clear) {
+            std::fputs("\n[4a.2] Gate 4 still failing — trying direct write of "
+                       "0xFFF99835 = 0x00...\n",
+                       stdout);
+            std::fflush(stdout);
+            constexpr std::array<std::uint8_t, 8> wmba_g4{
+                0x3DU, 0x14U, 0xFFU, 0xF9U, 0x98U, 0x35U, 0x01U, 0x00U};
+            auto resp_g4 = (*t)->send_recv(std::span<std::uint8_t const>{wmba_g4},
+                                           std::chrono::milliseconds{2000});
+            bool a_worked = false;
+            if (resp_g4.has_value()) {
+                auto const &body = resp_g4->data;
+                if (!body.empty() && body[0] == 0x7DU) {
+                    std::fputs("      OK (7D).\n", stdout);
+                    a_worked = true;
+                } else if (body.size() >= 3 && body[0] == 0x7FU &&
+                           body[1] == 0x3DU) {
+                    std::fprintf(stdout, "      NEGATIVE: NRC 0x%02X (likely "
+                                         "0xFFF99835 out of writable range).\n",
+                                 body[2]);
+                }
+            } else {
+                std::fprintf(stdout, "      transport timeout: %s\n",
+                             resp_g4.error().to_string().c_str());
+            }
+
+            if (!a_worked) {
+                std::fputs("\n[4a.3] Approach B — clear F3 by writing "
+                           "0xFFF88F49 (bit 0 = 0) then race aggregator...\n",
+                           stdout);
+                std::fflush(stdout);
+                // Read current value, mask out bit 0.
+                constexpr std::array<std::uint32_t, 1> f3_byte{0x00F88F49U};
+                auto cur = ssm.read(f3_byte, std::chrono::milliseconds{1000});
+                if (!cur.has_value() || cur->empty()) {
+                    std::fputs("      could not read 0xFFF88F49; skipping.\n",
+                               stdout);
+                } else {
+                    std::uint8_t const new_val =
+                        static_cast<std::uint8_t>((*cur)[0] & 0xFEU);
+                    std::array<std::uint8_t, 8> const wmba_f3{
+                        0x3DU, 0x14U, 0xFFU, 0xF8U, 0x8FU, 0x49U, 0x01U,
+                        new_val};
+                    std::fprintf(stdout,
+                                 "      writing 0xFFF88F49 = 0x%02X "
+                                 "(was 0x%02X, cleared bit 0)...\n",
+                                 new_val, (*cur)[0]);
+                    auto resp_f3 = (*t)->send_recv(
+                        std::span<std::uint8_t const>{wmba_f3},
+                        std::chrono::milliseconds{2000});
+                    if (resp_f3.has_value() && !resp_f3->data.empty() &&
+                        resp_f3->data[0] == 0x7DU) {
+                        std::fputs("      OK (7D).\n", stdout);
+                        // Sample 0xFFF99835 across multiple sleep windows
+                        // to characterize the re-assert race. Polls every
+                        // 20ms for up to 200ms — if 0xFFF99835 drops in
+                        // any window, the aggregator works; if it stays
+                        // 0x0A, F3 is being re-asserted faster than 20ms.
+                        constexpr std::array<std::uint32_t, 2> race_addrs{
+                            0x00F99835U, 0x00F88F49U};
+                        bool dropped = false;
+                        for (int ms = 20; ms <= 200; ms += 20) {
+                            std::this_thread::sleep_for(
+                                std::chrono::milliseconds{20});
+                            auto rr = ssm.read(
+                                race_addrs, std::chrono::milliseconds{1000});
+                            if (!rr.has_value())
+                                break;
+                            std::fprintf(stdout,
+                                         "      t=%dms  0xFFF99835=0x%02X  "
+                                         "0xFFF88F49=0x%02X (F3 bit 0: %s)\n",
+                                         ms, (*rr)[0], (*rr)[1],
+                                         ((*rr)[1] & 0x01U) ? "SET" : "clear");
+                            if ((*rr)[0] <= 0x05U) {
+                                dropped = true;
+                                std::fputs("      → gate 4 PASSES at this "
+                                           "moment — DSC immediately!\n",
+                                           stdout);
+                                break;
+                            }
+                        }
+                        if (!dropped) {
+                            std::fputs("      F3 re-asserted within 20ms, or "
+                                       "aggregator not ticking on bench.\n",
+                                       stdout);
+                        }
+                    } else if (resp_f3.has_value() &&
+                               resp_f3->data.size() >= 3 &&
+                               resp_f3->data[0] == 0x7FU) {
+                        std::fprintf(stdout, "      NEGATIVE: NRC 0x%02X.\n",
+                                     resp_f3->data[2]);
+                    } else if (!resp_f3.has_value()) {
+                        std::fprintf(stdout, "      transport: %s\n",
+                                     resp_f3.error().to_string().c_str());
+                    }
+                }
+            }
+        }
+    }
+
+    // Step 4b — fault-context snapshot (round-17 §3). Done INSIDE the
+    // unblock sequence so heartbeats are still active when we read the
+    // F2/F3/F4 clearer gate at 0xFFF88EC8 bit 0. If heartbeats temporarily
+    // open the gate, this is when we'd catch it.
+    {
+        std::fputs("\n[4b]  Fault-context snapshot (with heartbeats still active "
+                   "if --with-heartbeats)...\n",
+                   stdout);
+        constexpr std::array<std::uint32_t, 7> ctx_addrs{
+            0xFFF88EC8U, 0xFFF99819U, 0xFFF89124U,
+            0xFFF8BB0AU, 0xFFF8BB0BU, 0xFFF8917BU, 0xFFF89178U,
+        };
+        std::vector<std::uint32_t> c_addrs;
+        c_addrs.reserve(ctx_addrs.size());
+        for (auto a : ctx_addrs)
+            c_addrs.push_back(a & 0x00FFFFFFU);
+        auto c_read = ssm.read(c_addrs, std::chrono::milliseconds{2000});
+        if (!c_read.has_value()) {
+            std::fprintf(stderr, "      SSM-A8 read FAILED: %s\n",
+                         c_read.error().to_string().c_str());
+            return 1;
+        }
+        auto const &cv = *c_read;
+        bool const cg = (cv[0] & 0x01U) != 0;
+        std::fprintf(stdout,
+                     "      [%s] 0xFFF88EC8 = 0x%02X  clearer gate (bit 0: %s)\n"
+                     "           0xFFF99819 = 0x%02X  0xFFF89124 = 0x%02X\n"
+                     "           0xFFF8BB0A = 0x%04X (u16)  gate-5 computed input\n",
+                     cg ? "OK" : "XX",
+                     cv[0], cg ? "OPEN" : "CLOSED",
+                     cv[1], cv[2],
+                     static_cast<unsigned>(
+                         (static_cast<std::uint16_t>(cv[3]) << 8) | cv[4]));
+    }
+
+    // Step 5 — DSC 0x10 0x02
+    std::fputs("\n[5/5] DSC 0x10 0x02 (Programming)...\n", stdout);
+    auto const final_dsc = uds.diagnostic_session_control(
+        0x02, std::chrono::milliseconds{2000});
+    if (final_dsc.has_value()) {
+        std::fputs("      POSITIVE (50 02). **PHASE C OPEN.**\n", stdout);
+        std::fputc('\n', stdout);
+        std::fflush(stdout);
+        return 0;
+    }
+    auto const err = final_dsc.error().to_string();
+    std::fprintf(stdout, "      FAILED: %s\n", err.c_str());
+
+    // Summarize the wall against the snapshots we already have
+    std::fputs("\nWall summary:\n", stdout);
+    if (!g1)
+        std::fputs("  - gate 1 (SA success flag) is CLEAR. SA L1 either failed "
+                   "silently or 0xFFF9B855 is the secondary gate per round-16 §4. "
+                   "If SA step reported 67 02 yet gate 1 is clear, check "
+                   "0xFFF9B855 (must be 0x01) — likely needs Extended first.\n",
+                   stdout);
+    if (!g5) {
+        if (F1 || F2 || F3 || F4 || F5) {
+            std::fputs("  - gate 4 (fault counter > 0x05). Fault bits SET: ",
+                       stdout);
+            char const *sep = "";
+            if (F1) { std::fprintf(stdout, "%sF1", sep); sep = ", "; }
+            if (F2) { std::fprintf(stdout, "%sF2", sep); sep = ", "; }
+            if (F3) { std::fprintf(stdout, "%sF3", sep); sep = ", "; }
+            if (F4) { std::fprintf(stdout, "%sF4", sep); sep = ", "; }
+            if (F5) { std::fprintf(stdout, "%sF5", sep); }
+            std::fputc('\n', stdout);
+            std::fputs("    Round-17 work: trace setter of first asserted "
+                       "bit; may be bench-unavoidable per round-16 handoff §5.\n",
+                       stdout);
+        } else {
+            std::fputs("  - gate 4 (fault counter > 0x05) but ALL fault bits CLEAR. "
+                       "Aggregator at ROM 0x00077E60 is stuck — round-17 trace required.\n",
+                       stdout);
+        }
+    }
+    if (g1 && g5 && !g6) {
+        std::fputs("  - gate 5 (session-state byte) reads non-Extended after "
+                   "in-session sequence — anomalous; report to analyst.\n",
+                   stdout);
+    }
+    std::fputc('\n', stdout);
+    std::fflush(stdout);
+    return 1;
+}
+
 // fetching the calibration ID (CAL ID), which lets the user identify
 // which tune is currently active on the ECU without dumping the full
 // ROM. Mode 09 is in the default session and SA-free, so the command
@@ -22136,6 +23789,18 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "subaru-presence-test") {
         return cmd_subaru_presence_test(argc - 2, argv + 2);
+    }
+    if (cmd == "subaru-precondition-chain-probe") {
+        return cmd_subaru_precondition_chain_probe(argc - 2, argv + 2);
+    }
+    if (cmd == "subaru-dsc-try") {
+        return cmd_subaru_dsc_try(argc - 2, argv + 2);
+    }
+    if (cmd == "subaru-ram-snapshot") {
+        return cmd_subaru_ram_snapshot(argc - 2, argv + 2);
+    }
+    if (cmd == "subaru-dsc-unblock-sequence") {
+        return cmd_subaru_dsc_unblock_sequence(argc - 2, argv + 2);
     }
     if (cmd == "config") {
         return cmd_config(argc - 2, argv + 2);
