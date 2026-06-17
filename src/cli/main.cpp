@@ -18548,7 +18548,9 @@ int cmd_subaru_flash_bulk_transfer(int argc, char *argv[]) {
     std::string device_path;
     std::optional<std::uint32_t> addr;
     std::string data_hex;
-    std::string raw_payload_hex;
+    std::optional<std::string> raw_payload_hex;
+    std::optional<std::uint32_t> sweep_min;
+    std::optional<std::uint32_t> sweep_max;
     bool verbose = false;
 
     for (int i = 0; i < argc; ++i) {
@@ -18595,9 +18597,31 @@ int cmd_subaru_flash_bulk_transfer(int argc, char *argv[]) {
                 return 2;
         } else if (a == "--raw-payload") {
             if (auto const *v = require_arg("--raw-payload"); v)
-                raw_payload_hex = v;
+                raw_payload_hex = std::string{v};
             else
                 return 2;
+        } else if (a == "--zeros-sweep") {
+            auto const *vmin = require_arg("--zeros-sweep min");
+            if (vmin == nullptr) return 2;
+            char *end = nullptr;
+            auto const vmin_val = std::strtoull(vmin, &end, 0);
+            if (end == vmin || *end != '\0' || vmin_val > 250ULL) {
+                std::fputs("subaru-flash-bulk-transfer: --zeros-sweep min must "
+                           "be 0..250\n", stderr);
+                return 2;
+            }
+            sweep_min = static_cast<std::uint32_t>(vmin_val);
+            auto const *vmax = require_arg("--zeros-sweep max");
+            if (vmax == nullptr) return 2;
+            end = nullptr;
+            auto const vmax_val = std::strtoull(vmax, &end, 0);
+            if (end == vmax || *end != '\0' || vmax_val < vmin_val ||
+                vmax_val > 250ULL) {
+                std::fputs("subaru-flash-bulk-transfer: --zeros-sweep max must "
+                           "be min..250\n", stderr);
+                return 2;
+            }
+            sweep_max = static_cast<std::uint32_t>(vmax_val);
         } else if (a == "--zeros") {
             // Convenience: --zeros <count>
             auto const *v = require_arg("--zeros");
@@ -18620,9 +18644,11 @@ int cmd_subaru_flash_bulk_transfer(int argc, char *argv[]) {
         }
     }
 
-    bool const using_raw = !raw_payload_hex.empty();
+    bool const using_raw = raw_payload_hex.has_value();
+    bool const using_sweep = sweep_min.has_value() && sweep_max.has_value();
     if (!transport_kind.has_value() ||
-        (!using_raw && (!addr.has_value() || data_hex.empty()))) {
+        (!using_raw && !using_sweep && (!addr.has_value() ||
+                                         data_hex.empty()))) {
         std::fputs(
             "subaru-flash-bulk-transfer — UDS 0xB6 SubaruBulkTransfer wrapper.\n"
             "\n"
@@ -18643,9 +18669,16 @@ int cmd_subaru_flash_bulk_transfer(int argc, char *argv[]) {
             "  subuwutuner-cli subaru-flash-bulk-transfer \\\n"
             "      --transport obdx --device COM4 \\\n"
             "      --raw-payload <hex>\n"
-            "  Sends literally 'B6 + <hex bytes>' on the wire. Lets the user\n"
-            "  iterate format hypotheses without the in-tree builder's\n"
-            "  assumptions. Logs request + response in full.\n",
+            "  Sends literally 'B6 + <hex bytes>' on the wire. Empty <hex>\n"
+            "  sends just the 1-byte 'B6' (round-25 single-byte test).\n"
+            "\n"
+            "Usage (zeros-sweep — round-25 §2 fallback):\n"
+            "  subuwutuner-cli subaru-flash-bulk-transfer \\\n"
+            "      --transport obdx --device COM4 \\\n"
+            "      --zeros-sweep <min> <max>\n"
+            "  Iterates N from <min> to <max>, sending 'B6 + N zero bytes'.\n"
+            "  Stops at the first response that isn't NRC 0x13 (incorrectLength)\n"
+            "  or at the first positive 0xF6.\n",
             stderr);
         return 2;
     }
@@ -18660,38 +18693,42 @@ int cmd_subaru_flash_bulk_transfer(int argc, char *argv[]) {
     // Strip whitespace from raw payload before parsing
     if (using_raw) {
         std::string cleaned;
-        cleaned.reserve(raw_payload_hex.size());
-        for (char c : raw_payload_hex) {
+        cleaned.reserve(raw_payload_hex->size());
+        for (char c : *raw_payload_hex) {
             if (c != ' ' && c != '\t' && c != '\n' && c != '\r')
                 cleaned.push_back(c);
         }
         raw_payload_hex = std::move(cleaned);
-        if (raw_payload_hex.size() % 2 != 0) {
+        if (raw_payload_hex->size() % 2 != 0) {
             std::fputs("subaru-flash-bulk-transfer: --raw-payload must be "
-                       "even-length hex\n", stderr);
+                       "even-length hex (or empty for the round-25 single-byte "
+                       "test)\n", stderr);
             return 2;
         }
     }
 
-    // Parse hex (standard --data path or --raw-payload)
-    std::string const &src_hex = using_raw ? raw_payload_hex : data_hex;
-    if (!using_raw && (src_hex.size() % 2 != 0)) {
-        std::fputs("subaru-flash-bulk-transfer: --data must be even-length hex\n",
-                   stderr);
-        return 2;
-    }
+    // Parse hex (standard --data path or --raw-payload); sweep builds its
+    // own per-iteration payloads inside the loop below.
     std::vector<std::uint8_t> data;
-    data.reserve(src_hex.size() / 2);
-    for (std::size_t i = 0; i < src_hex.size(); i += 2) {
-        int const hi = hex_nibble(src_hex[i]);
-        int const lo = hex_nibble(src_hex[i + 1]);
-        if (hi < 0 || lo < 0) {
-            std::fprintf(stderr,
-                         "subaru-flash-bulk-transfer: non-hex char: %c%c\n",
-                         src_hex[i], src_hex[i + 1]);
+    if (!using_sweep) {
+        std::string const &src_hex = using_raw ? *raw_payload_hex : data_hex;
+        if (!using_raw && (src_hex.size() % 2 != 0)) {
+            std::fputs("subaru-flash-bulk-transfer: --data must be even-length "
+                       "hex\n", stderr);
             return 2;
         }
-        data.push_back(static_cast<std::uint8_t>((hi << 4) | lo));
+        data.reserve(src_hex.size() / 2);
+        for (std::size_t i = 0; i < src_hex.size(); i += 2) {
+            int const hi = hex_nibble(src_hex[i]);
+            int const lo = hex_nibble(src_hex[i + 1]);
+            if (hi < 0 || lo < 0) {
+                std::fprintf(stderr,
+                             "subaru-flash-bulk-transfer: non-hex char: %c%c\n",
+                             src_hex[i], src_hex[i + 1]);
+                return 2;
+            }
+            data.push_back(static_cast<std::uint8_t>((hi << 4) | lo));
+        }
     }
 
     auto const kind = st::transport::parse_kind(*transport_kind);
@@ -18716,6 +18753,68 @@ int cmd_subaru_flash_bulk_transfer(int argc, char *argv[]) {
         std::fprintf(stderr,
                      "subaru-flash-bulk-transfer: transport open failed: %s\n",
                      s.error().to_string().c_str());
+        return 1;
+    }
+
+    // Round-25 §2 — sweep wire-lengths from min..max (each iteration:
+    // B6 + N zero bytes). Stops at first non-NRC-0x13 response or first
+    // positive 0xF6.
+    if (using_sweep) {
+        std::fprintf(stdout,
+                     "subaru-flash-bulk-transfer: --zeros-sweep %u..%u (each "
+                     "wire = B6 + N zero bytes, total = 1 + N)\n",
+                     *sweep_min, *sweep_max);
+        std::fflush(stdout);
+        for (std::uint32_t n = *sweep_min; n <= *sweep_max; ++n) {
+            std::vector<std::uint8_t> sreq(1u + n, 0x00U);
+            sreq[0] = 0xB6U;
+            auto resp = (*t)->send_recv(std::span<std::uint8_t const>{sreq},
+                                        std::chrono::milliseconds{2000});
+            if (!resp.has_value()) {
+                std::fprintf(stdout, "  N=%u  transport: %s\n", n,
+                             resp.error().to_string().c_str());
+                break;
+            }
+            auto const &body = resp->data;
+            if (body.empty()) {
+                std::fprintf(stdout, "  N=%u  empty\n", n);
+                break;
+            }
+            if (body[0] == 0xF6U) {
+                std::fprintf(stdout,
+                             "  N=%u  POSITIVE 0xF6 — handler accepted!\n", n);
+                std::fputs("  response body:", stdout);
+                for (auto b : body)
+                    std::fprintf(stdout, " %02X", b);
+                std::fputc('\n', stdout);
+                std::fputc('\n', stdout);
+                std::fflush(stdout);
+                return 0;
+            }
+            if (body.size() >= 3 && body[0] == 0x7FU && body[1] == 0xB6U) {
+                if (body[2] != 0x13U) {
+                    std::fprintf(stdout,
+                                 "  N=%u  NRC 0x%02X — first non-0x13!\n",
+                                 n, body[2]);
+                    std::fputc('\n', stdout);
+                    std::fflush(stdout);
+                    return 1;
+                }
+                // NRC 0x13 — continue
+                if (n % 8 == 0) {
+                    std::fprintf(stdout, "  N=%u  NRC 0x13\n", n);
+                    std::fflush(stdout);
+                }
+            } else {
+                std::fprintf(stdout,
+                             "  N=%u  unexpected response 0x%02X\n",
+                             n, body[0]);
+                break;
+            }
+        }
+        std::fprintf(stdout,
+                     "  sweep complete (no non-0x13 / no positive in range)\n");
+        std::fputc('\n', stdout);
         return 1;
     }
 
