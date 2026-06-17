@@ -18438,6 +18438,7 @@ int cmd_subaru_flash_exit(int argc, char *argv[]) {
     std::optional<std::string> transport_kind;
     std::string dll_path;
     std::string device_path;
+    std::optional<std::string> body_hex;
     bool verbose = false;
 
     for (int i = 0; i < argc; ++i) {
@@ -18465,6 +18466,11 @@ int cmd_subaru_flash_exit(int argc, char *argv[]) {
                 dll_path = v;
             else
                 return 2;
+        } else if (a == "--body") {
+            if (auto const *v = require_arg("--body"); v)
+                body_hex = std::string{v};
+            else
+                return 2;
         } else if (a == "--verbose") {
             verbose = true;
         } else {
@@ -18479,7 +18485,12 @@ int cmd_subaru_flash_exit(int argc, char *argv[]) {
             "subaru-flash-exit — UDS 0x37 RequestTransferExit wrapper.\n"
             "\n"
             "Usage:\n"
-            "  subuwutuner-cli subaru-flash-exit --transport obdx --device COM4\n",
+            "  subuwutuner-cli subaru-flash-exit --transport obdx --device COM4 \\\n"
+            "      [--body <hex>]\n"
+            "\n"
+            "Round-28 §1.1: --body sends 'transferRequestParameterRecord'\n"
+            "(per ISO 14229-1 §11.4). Candidates: 5A A5 (checksum sentinel),\n"
+            "00 00, 01 04 (negotiated max-block-length BE).\n",
             stderr);
         return 2;
     }
@@ -18508,9 +18519,47 @@ int cmd_subaru_flash_exit(int argc, char *argv[]) {
         return 1;
     }
 
-    std::array<std::uint8_t, 1> const req{0x37U};
+    // Build request: 0x37 + optional body (round-28 §1.1).
+    std::vector<std::uint8_t> req;
+    req.reserve(1U + (body_hex.has_value() ? body_hex->size() / 2 : 0));
+    req.push_back(0x37U);
+    if (body_hex.has_value()) {
+        std::string cleaned;
+        cleaned.reserve(body_hex->size());
+        for (char c : *body_hex) {
+            if (c != ' ' && c != '\t' && c != '\n' && c != '\r')
+                cleaned.push_back(c);
+        }
+        if (cleaned.size() % 2 != 0) {
+            std::fputs("subaru-flash-exit: --body must be even-length hex\n",
+                       stderr);
+            return 2;
+        }
+        auto const hex_nibble = [](char c) -> int {
+            if (c >= '0' && c <= '9') return c - '0';
+            if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+            if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+            return -1;
+        };
+        for (std::size_t i = 0; i < cleaned.size(); i += 2) {
+            int const hi = hex_nibble(cleaned[i]);
+            int const lo = hex_nibble(cleaned[i + 1]);
+            if (hi < 0 || lo < 0) {
+                std::fprintf(stderr,
+                             "subaru-flash-exit: non-hex char in --body: %c%c\n",
+                             cleaned[i], cleaned[i + 1]);
+                return 2;
+            }
+            req.push_back(static_cast<std::uint8_t>((hi << 4) | lo));
+        }
+        std::fputs("subaru-flash-exit: sending", stdout);
+        for (auto b : req)
+            std::fprintf(stdout, " %02X", b);
+        std::fputc('\n', stdout);
+        std::fflush(stdout);
+    }
     auto resp = (*t)->send_recv(std::span<std::uint8_t const>{req},
-                                std::chrono::milliseconds{2000});
+                                std::chrono::milliseconds{3000});
     if (!resp.has_value()) {
         std::fprintf(stderr, "subaru-flash-exit: %s\n",
                      resp.error().to_string().c_str());
