@@ -18194,6 +18194,513 @@ int cmd_subaru_read_did(int argc, char *argv[]) {
     return 0;
 }
 
+// cmd_subaru_flash_request_download — UDS 0x34 (RequestDownload) wrapper.
+// Round-22 §1 deliverable. Sends the canonical 9-byte 34 04 33 <addr-3>
+// <len-3> request after Phase C + SA L1 are held. Bounds-check matches
+// the firmware handler at ROM 0x000018C4..1908.
+//
+// Wire-address modes:
+//   raw         (default)        — req[3..5] = addr low 24 bits directly
+//   --cipher-mode                 — sets bit 7 of req[3] to trigger alt
+//                                   firmware code path (round-22 §1 hint)
+//
+// Caller's responsibility to have done subaru-dsc-unblock-sequence
+// --burst-write-extended first; this verb does NOT check session state.
+int cmd_subaru_flash_request_download(int argc, char *argv[]) {
+    std::optional<std::string> transport_kind;
+    std::string dll_path;
+    std::string device_path;
+    std::optional<std::uint32_t> addr;
+    std::optional<std::uint32_t> length;
+    bool cipher_mode = false;
+    bool verbose = false;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr,
+                             "subaru-flash-request-download: %s requires a value\n",
+                             name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--transport") {
+            if (auto const *v = require_arg("--transport"); v)
+                transport_kind = std::string{v};
+            else
+                return 2;
+        } else if (a == "--device") {
+            if (auto const *v = require_arg("--device"); v)
+                device_path = v;
+            else
+                return 2;
+        } else if (a == "--dll") {
+            if (auto const *v = require_arg("--dll"); v)
+                dll_path = v;
+            else
+                return 2;
+        } else if (a == "--addr") {
+            auto const *v = require_arg("--addr");
+            if (v == nullptr) return 2;
+            char *end = nullptr;
+            auto const val = std::strtoull(v, &end, 0);
+            if (end == v || *end != '\0' || val > 0xFFFFFFULL) {
+                std::fputs("subaru-flash-request-download: --addr must be a "
+                           "24-bit value\n", stderr);
+                return 2;
+            }
+            addr = static_cast<std::uint32_t>(val);
+        } else if (a == "--length") {
+            auto const *v = require_arg("--length");
+            if (v == nullptr) return 2;
+            char *end = nullptr;
+            auto const val = std::strtoull(v, &end, 0);
+            if (end == v || *end != '\0' || val == 0 || val > 0xFFFFFFULL) {
+                std::fputs("subaru-flash-request-download: --length must be "
+                           "1..0xFFFFFF\n", stderr);
+                return 2;
+            }
+            length = static_cast<std::uint32_t>(val);
+        } else if (a == "--cipher-mode") {
+            cipher_mode = true;
+        } else if (a == "--verbose") {
+            verbose = true;
+        } else {
+            std::fprintf(stderr,
+                         "subaru-flash-request-download: unknown option: %s\n",
+                         argv[i]);
+            return 2;
+        }
+    }
+
+    if (!transport_kind.has_value() || !addr.has_value() ||
+        !length.has_value()) {
+        std::fputs(
+            "subaru-flash-request-download — UDS 0x34 RequestDownload wrapper.\n"
+            "\n"
+            "Usage:\n"
+            "  subuwutuner-cli subaru-flash-request-download \\\n"
+            "      --transport obdx --device COM4 \\\n"
+            "      --addr 0x008000 --length 0x0080 \\\n"
+            "      [--cipher-mode] [--verbose]\n"
+            "\n"
+            "Sends 34 04 33 <addr-3> <len-3>. Caller must already have a\n"
+            "successful subaru-dsc-unblock-sequence (Phase C) in flight.\n",
+            stderr);
+        return 2;
+    }
+
+    // Bounds (firmware checks at 0x192E..0x194A per round-22 §1.0)
+    if (*addr < 0x6000U) {
+        std::fputs(
+            "subaru-flash-request-download: --addr below 0x6000 (boot region "
+            "protection)\n", stderr);
+        return 2;
+    }
+    if (*length > 0x201FA0U) {
+        std::fputs(
+            "subaru-flash-request-download: --length exceeds 0x201FA0\n",
+            stderr);
+        return 2;
+    }
+    if (*addr + *length >= 0x202000U) {
+        std::fputs(
+            "subaru-flash-request-download: addr + length exceeds 0x202000 "
+            "(ROM end)\n", stderr);
+        return 2;
+    }
+
+    auto const kind = st::transport::parse_kind(*transport_kind);
+    if (!kind.has_value()) {
+        std::fprintf(stderr,
+                     "subaru-flash-request-download: --transport '%s' not "
+                     "recognized\n", transport_kind->c_str());
+        return 2;
+    }
+    st::transport::TransportSpec const spec{*kind, dll_path, device_path};
+    auto t = st::transport::open_transport(spec);
+    if (!t.has_value()) {
+        std::fprintf(stderr, "subaru-flash-request-download: %s\n",
+                     t.error().to_string().c_str());
+        return 1;
+    }
+    if (verbose)
+        st::transport::obdx::set_trace_enabled(true);
+    st::transport::LinkConfig const link{st::transport::LinkKind::CanIso15765,
+                                         500000, 0x000007E0, 0x000007E8};
+    if (auto s = (*t)->open(link); !s.has_value()) {
+        std::fprintf(stderr,
+                     "subaru-flash-request-download: transport open failed: "
+                     "%s\n", s.error().to_string().c_str());
+        return 1;
+    }
+
+    std::uint32_t wire_addr = *addr;
+    if (cipher_mode) {
+        wire_addr |= 0x800000U;  // sets bit 7 of req[3] per round-22 §1
+    }
+    std::array<std::uint8_t, 9> const req{
+        0x34U, 0x04U, 0x33U,
+        static_cast<std::uint8_t>((wire_addr >> 16) & 0xFFU),
+        static_cast<std::uint8_t>((wire_addr >> 8) & 0xFFU),
+        static_cast<std::uint8_t>(wire_addr & 0xFFU),
+        static_cast<std::uint8_t>((*length >> 16) & 0xFFU),
+        static_cast<std::uint8_t>((*length >> 8) & 0xFFU),
+        static_cast<std::uint8_t>(*length & 0xFFU),
+    };
+    std::fputs("subaru-flash-request-download: sending UDS 0x34 ", stdout);
+    for (auto b : req)
+        std::fprintf(stdout, "%02X ", b);
+    std::fputc('\n', stdout);
+    std::fflush(stdout);
+
+    auto resp = (*t)->send_recv(std::span<std::uint8_t const>{req},
+                                std::chrono::milliseconds{3000});
+    if (!resp.has_value()) {
+        std::fprintf(stderr, "subaru-flash-request-download: %s\n",
+                     resp.error().to_string().c_str());
+        return 1;
+    }
+    auto const &body = resp->data;
+    if (body.empty()) {
+        std::fputs("subaru-flash-request-download: empty response\n", stderr);
+        return 1;
+    }
+    if (body[0] == 0x74U) {
+        std::fputs("POSITIVE (0x74) — Phase D OPEN.\n", stdout);
+        std::fputs("response:", stdout);
+        for (auto b : body)
+            std::fprintf(stdout, " %02X", b);
+        std::fputc('\n', stdout);
+        if (body.size() >= 2) {
+            // lengthFormatIdentifier high nibble = byte-count for maxBlockLength
+            std::uint8_t const lfi = body[1];
+            std::uint8_t const max_len_bytes = (lfi >> 4) & 0x0FU;
+            if (max_len_bytes > 0 && body.size() >= 2u + max_len_bytes) {
+                std::uint64_t max_block = 0;
+                for (std::uint8_t i = 0; i < max_len_bytes; ++i)
+                    max_block = (max_block << 8) | body[2 + i];
+                std::fprintf(stdout, "maxNumberOfBlockLength: %llu bytes\n",
+                             static_cast<unsigned long long>(max_block));
+            }
+        }
+        return 0;
+    }
+    if (body.size() >= 3 && body[0] == 0x7FU && body[1] == 0x34U) {
+        char const *hint =
+            body[2] == 0x12U ? "subFunctionNotSupported" :
+            body[2] == 0x13U ? "incorrectMessageLength" :
+            body[2] == 0x22U ? "conditionsNotCorrect (not in Phase C?)" :
+            body[2] == 0x31U ? "requestOutOfRange (addr or length out of bounds)" :
+            body[2] == 0x33U ? "securityAccessDenied (SA level insufficient)" :
+                               "(unknown NRC)";
+        std::fprintf(stdout, "NEGATIVE: NRC 0x%02X — %s\n", body[2], hint);
+        return 1;
+    }
+    std::fprintf(stdout, "UNEXPECTED response (first byte 0x%02X)\n", body[0]);
+    return 1;
+}
+
+// cmd_subaru_flash_exit — UDS 0x37 (RequestTransferExit) wrapper.
+// Round-22 §2 deliverable. Always safe to call; on success returns
+// 0x77, otherwise NRC and the ECU's download state will time out
+// naturally via the S3 timer.
+int cmd_subaru_flash_exit(int argc, char *argv[]) {
+    std::optional<std::string> transport_kind;
+    std::string dll_path;
+    std::string device_path;
+    bool verbose = false;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "subaru-flash-exit: %s requires a value\n",
+                             name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--transport") {
+            if (auto const *v = require_arg("--transport"); v)
+                transport_kind = std::string{v};
+            else
+                return 2;
+        } else if (a == "--device") {
+            if (auto const *v = require_arg("--device"); v)
+                device_path = v;
+            else
+                return 2;
+        } else if (a == "--dll") {
+            if (auto const *v = require_arg("--dll"); v)
+                dll_path = v;
+            else
+                return 2;
+        } else if (a == "--verbose") {
+            verbose = true;
+        } else {
+            std::fprintf(stderr, "subaru-flash-exit: unknown option: %s\n",
+                         argv[i]);
+            return 2;
+        }
+    }
+
+    if (!transport_kind.has_value()) {
+        std::fputs(
+            "subaru-flash-exit — UDS 0x37 RequestTransferExit wrapper.\n"
+            "\n"
+            "Usage:\n"
+            "  subuwutuner-cli subaru-flash-exit --transport obdx --device COM4\n",
+            stderr);
+        return 2;
+    }
+
+    auto const kind = st::transport::parse_kind(*transport_kind);
+    if (!kind.has_value()) {
+        std::fprintf(stderr,
+                     "subaru-flash-exit: --transport '%s' not recognized\n",
+                     transport_kind->c_str());
+        return 2;
+    }
+    st::transport::TransportSpec const spec{*kind, dll_path, device_path};
+    auto t = st::transport::open_transport(spec);
+    if (!t.has_value()) {
+        std::fprintf(stderr, "subaru-flash-exit: %s\n",
+                     t.error().to_string().c_str());
+        return 1;
+    }
+    if (verbose)
+        st::transport::obdx::set_trace_enabled(true);
+    st::transport::LinkConfig const link{st::transport::LinkKind::CanIso15765,
+                                         500000, 0x000007E0, 0x000007E8};
+    if (auto s = (*t)->open(link); !s.has_value()) {
+        std::fprintf(stderr, "subaru-flash-exit: transport open failed: %s\n",
+                     s.error().to_string().c_str());
+        return 1;
+    }
+
+    std::array<std::uint8_t, 1> const req{0x37U};
+    auto resp = (*t)->send_recv(std::span<std::uint8_t const>{req},
+                                std::chrono::milliseconds{2000});
+    if (!resp.has_value()) {
+        std::fprintf(stderr, "subaru-flash-exit: %s\n",
+                     resp.error().to_string().c_str());
+        return 1;
+    }
+    auto const &body = resp->data;
+    if (body.empty()) {
+        std::fputs("subaru-flash-exit: empty response\n", stderr);
+        return 1;
+    }
+    if (body[0] == 0x77U) {
+        std::fputs("POSITIVE (0x77) — flash protocol closed cleanly.\n",
+                   stdout);
+        return 0;
+    }
+    if (body.size() >= 3 && body[0] == 0x7FU && body[1] == 0x37U) {
+        std::fprintf(stdout,
+                     "NRC 0x%02X — ECU's download state will time out via S3 "
+                     "timer (acceptable when no prior 0x34 + 0xB6 sequence).\n",
+                     body[2]);
+        return 0;
+    }
+    std::fprintf(stdout, "UNEXPECTED response 0x%02X\n", body[0]);
+    return 0;
+}
+
+// cmd_subaru_flash_bulk_transfer — UDS 0xB6 (SubaruBulkTransfer) wrapper.
+// Round-22 §3 deliverable. Uses st::ecu::uds::build_subaru_bulk_transfer
+// to construct the request. **CARE NEEDED:** this is the actual data
+// transfer step. Per round-22 §7, the verb does no auto-chunking — caller
+// must supply data ≤ negotiated maxNumberOfBlockLength.
+int cmd_subaru_flash_bulk_transfer(int argc, char *argv[]) {
+    std::optional<std::string> transport_kind;
+    std::string dll_path;
+    std::string device_path;
+    std::optional<std::uint32_t> addr;
+    std::string data_hex;
+    bool verbose = false;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr,
+                             "subaru-flash-bulk-transfer: %s requires a value\n",
+                             name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--transport") {
+            if (auto const *v = require_arg("--transport"); v)
+                transport_kind = std::string{v};
+            else
+                return 2;
+        } else if (a == "--device") {
+            if (auto const *v = require_arg("--device"); v)
+                device_path = v;
+            else
+                return 2;
+        } else if (a == "--dll") {
+            if (auto const *v = require_arg("--dll"); v)
+                dll_path = v;
+            else
+                return 2;
+        } else if (a == "--addr") {
+            auto const *v = require_arg("--addr");
+            if (v == nullptr) return 2;
+            char *end = nullptr;
+            auto const val = std::strtoull(v, &end, 0);
+            if (end == v || *end != '\0' || val > 0xFFFFFFULL) {
+                std::fputs("subaru-flash-bulk-transfer: --addr must be a "
+                           "24-bit value\n", stderr);
+                return 2;
+            }
+            addr = static_cast<std::uint32_t>(val);
+        } else if (a == "--data") {
+            if (auto const *v = require_arg("--data"); v)
+                data_hex = v;
+            else
+                return 2;
+        } else if (a == "--zeros") {
+            // Convenience: --zeros <count>
+            auto const *v = require_arg("--zeros");
+            if (v == nullptr) return 2;
+            char *end = nullptr;
+            auto const val = std::strtoull(v, &end, 0);
+            if (end == v || *end != '\0' || val == 0 || val > 1024ULL) {
+                std::fputs("subaru-flash-bulk-transfer: --zeros must be "
+                           "1..1024\n", stderr);
+                return 2;
+            }
+            data_hex = std::string(val * 2U, '0');
+        } else if (a == "--verbose") {
+            verbose = true;
+        } else {
+            std::fprintf(stderr,
+                         "subaru-flash-bulk-transfer: unknown option: %s\n",
+                         argv[i]);
+            return 2;
+        }
+    }
+
+    if (!transport_kind.has_value() || !addr.has_value() || data_hex.empty()) {
+        std::fputs(
+            "subaru-flash-bulk-transfer — UDS 0xB6 SubaruBulkTransfer wrapper.\n"
+            "\n"
+            "WARNING: writes data to ECU flash memory. Caller must have:\n"
+            "  - Phase C + Phase D negotiated (subaru-dsc-unblock-sequence +\n"
+            "    subaru-flash-request-download)\n"
+            "  - Data length <= negotiated maxNumberOfBlockLength\n"
+            "  - --addr matching the 0x34 negotiation\n"
+            "\n"
+            "Usage:\n"
+            "  subuwutuner-cli subaru-flash-bulk-transfer \\\n"
+            "      --transport obdx --device COM4 \\\n"
+            "      --addr 0x008000 \\\n"
+            "      (--data <hex>  |  --zeros <N>)\n"
+            "      [--verbose]\n",
+            stderr);
+        return 2;
+    }
+
+    // Parse hex
+    if (data_hex.size() % 2 != 0) {
+        std::fputs("subaru-flash-bulk-transfer: --data must be even-length hex\n",
+                   stderr);
+        return 2;
+    }
+    std::vector<std::uint8_t> data;
+    data.reserve(data_hex.size() / 2);
+    for (std::size_t i = 0; i < data_hex.size(); i += 2) {
+        auto const hex_nibble = [](char c) -> int {
+            if (c >= '0' && c <= '9') return c - '0';
+            if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+            if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+            return -1;
+        };
+        int const hi = hex_nibble(data_hex[i]);
+        int const lo = hex_nibble(data_hex[i + 1]);
+        if (hi < 0 || lo < 0) {
+            std::fprintf(stderr,
+                         "subaru-flash-bulk-transfer: non-hex char in --data: "
+                         "%c%c\n", data_hex[i], data_hex[i + 1]);
+            return 2;
+        }
+        data.push_back(static_cast<std::uint8_t>((hi << 4) | lo));
+    }
+
+    auto const kind = st::transport::parse_kind(*transport_kind);
+    if (!kind.has_value()) {
+        std::fprintf(stderr,
+                     "subaru-flash-bulk-transfer: --transport '%s' not "
+                     "recognized\n", transport_kind->c_str());
+        return 2;
+    }
+    st::transport::TransportSpec const spec{*kind, dll_path, device_path};
+    auto t = st::transport::open_transport(spec);
+    if (!t.has_value()) {
+        std::fprintf(stderr, "subaru-flash-bulk-transfer: %s\n",
+                     t.error().to_string().c_str());
+        return 1;
+    }
+    if (verbose)
+        st::transport::obdx::set_trace_enabled(true);
+    st::transport::LinkConfig const link{st::transport::LinkKind::CanIso15765,
+                                         500000, 0x000007E0, 0x000007E8};
+    if (auto s = (*t)->open(link); !s.has_value()) {
+        std::fprintf(stderr,
+                     "subaru-flash-bulk-transfer: transport open failed: %s\n",
+                     s.error().to_string().c_str());
+        return 1;
+    }
+
+    auto const req = st::ecu::uds::build_subaru_bulk_transfer(*addr, data);
+    std::fprintf(stdout,
+                 "subaru-flash-bulk-transfer: sending B6 to 0x%06X, %zu data "
+                 "bytes (request %zu bytes total)\n",
+                 *addr, data.size(), req.size());
+    std::fflush(stdout);
+
+    auto resp = (*t)->send_recv(std::span<std::uint8_t const>{req},
+                                std::chrono::milliseconds{10000});
+    if (!resp.has_value()) {
+        std::fprintf(stderr, "subaru-flash-bulk-transfer: %s\n",
+                     resp.error().to_string().c_str());
+        return 1;
+    }
+    auto const &body = resp->data;
+    if (body.empty()) {
+        std::fputs("subaru-flash-bulk-transfer: empty response\n", stderr);
+        return 1;
+    }
+    std::fputs("response:", stdout);
+    for (auto b : body)
+        std::fprintf(stdout, " %02X", b);
+    std::fputc('\n', stdout);
+
+    if (body[0] == 0xF6U) {
+        std::fputs("POSITIVE (0xF6) — bulk transfer accepted.\n", stdout);
+        return 0;
+    }
+    if (body.size() >= 3 && body[0] == 0x7FU && body[1] == 0xB6U) {
+        char const *hint =
+            body[2] == 0x12U ? "subFunctionNotSupported" :
+            body[2] == 0x13U ? "incorrectMessageLength" :
+            body[2] == 0x22U ? "conditionsNotCorrect (sentinel/cipher gate?)" :
+            body[2] == 0x31U ? "requestOutOfRange (addr / format mismatch)" :
+            body[2] == 0x33U ? "securityAccessDenied" :
+                               "(unknown NRC)";
+        std::fprintf(stdout, "NEGATIVE: NRC 0x%02X — %s\n", body[2], hint);
+        return 1;
+    }
+    std::fprintf(stdout, "UNEXPECTED response 0x%02X\n", body[0]);
+    return 1;
+}
+
 // fetching the calibration ID (CAL ID), which lets the user identify
 // which tune is currently active on the ECU without dumping the full
 // ROM. Mode 09 is in the default session and SA-free, so the command
@@ -24276,6 +24783,15 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "subaru-read-did") {
         return cmd_subaru_read_did(argc - 2, argv + 2);
+    }
+    if (cmd == "subaru-flash-request-download") {
+        return cmd_subaru_flash_request_download(argc - 2, argv + 2);
+    }
+    if (cmd == "subaru-flash-exit") {
+        return cmd_subaru_flash_exit(argc - 2, argv + 2);
+    }
+    if (cmd == "subaru-flash-bulk-transfer") {
+        return cmd_subaru_flash_bulk_transfer(argc - 2, argv + 2);
     }
     if (cmd == "config") {
         return cmd_config(argc - 2, argv + 2);
