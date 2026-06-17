@@ -16923,6 +16923,8 @@ int cmd_subaru_dsc_unblock_sequence(int argc, char *argv[]) {
     bool write_gate_byte = false;
     bool burst_write = false;
     bool burst_write_extended = false;
+    bool probe_flash_services = false;
+    bool force = false;
     bool verbose = false;
 
     for (int i = 0; i < argc; ++i) {
@@ -16961,6 +16963,10 @@ int cmd_subaru_dsc_unblock_sequence(int argc, char *argv[]) {
         } else if (a == "--burst-write-extended") {
             burst_write = true;
             burst_write_extended = true;
+        } else if (a == "--probe-flash-services") {
+            probe_flash_services = true;
+        } else if (a == "--force") {
+            force = true;
         } else if (a == "--with-heartbeats") {
             with_heartbeats = true;
         } else if (a == "--heartbeat-duration-ms") {
@@ -17022,6 +17028,17 @@ int cmd_subaru_dsc_unblock_sequence(int argc, char *argv[]) {
             "                    Round-19 §2.1 fallback: 5-write burst (adds\n"
             "                    cancel flags D/E and preemptive write of F3/F4\n"
             "                    byte 0xFFF88F49 = 0). Use if --burst-write fails.\n"
+            "                    Bench-validated: this + race-poll grants 50 02.\n"
+            "  --probe-flash-services\n"
+            "                    Round-20: after DSC 0x10 0x02 grant, send a\n"
+            "                    single-byte SID request for each of {0x34, 0x35,\n"
+            "                    0x36, 0x37, 0x31, 0x2E, 0x22, 0x85, 0xB6, 0x11}\n"
+            "                    and log the response. Builds the round-21\n"
+            "                    analyst's data input on which flash services\n"
+            "                    are reachable post-Phase-C.\n"
+            "  --force           Skip the pre-flight session-state check (which\n"
+            "                    refuses to run if the ECU is already in\n"
+            "                    Programming from a prior run).\n"
             "\n"
             "Usage:\n"
             "  subuwutuner-cli subaru-dsc-unblock-sequence \\\n"
@@ -17060,6 +17077,33 @@ int cmd_subaru_dsc_unblock_sequence(int argc, char *argv[]) {
 
     st::ecu::uds::UdsClient uds{**t};
     st::ecu::ssm::SsmClient ssm{**t, st::ecu::ssm::Framing::IsoTp};
+
+    // Round-20 §1 pre-flight check — if ECU is already in Programming
+    // session (gate-5 byte 0xFFF9B853 reads 0x02), warn the user that
+    // the bench needs power-cycling before this verb can run cleanly.
+    // SSM-A8 doesn't need SA, so this runs in <100 ms before any other
+    // work and surfaces the most common bench failure mode (forgot to
+    // power-cycle after a previous successful grant).
+    {
+        constexpr std::array<std::uint32_t, 1> session_addr{0x00F9B853U};
+        auto pf = ssm.read(session_addr, std::chrono::milliseconds{2000});
+        if (pf.has_value() && (*pf)[0] == 0x02U) {
+            std::fputs("\n[pre-flight] WARNING: ECU is already in Programming "
+                       "session (0xFFF9B853 = 0x02).\n", stderr);
+            std::fputs("              The ECU latches into Programming after a "
+                       "successful grant; UDS 0x11 (ECUReset)\n"
+                       "              is not in this firmware's dispatch table. "
+                       "Power-cycle the 12 V PSU and retry.\n",
+                       stderr);
+            if (!force) {
+                std::fputs("              Aborting. Use --force to override.\n",
+                           stderr);
+                return 1;
+            }
+            std::fputs("              --force present; proceeding anyway. "
+                       "Expect DSC 0x10 0x03 to fail.\n", stderr);
+        }
+    }
 
     // Round-17 Path B — vehicle-presence heartbeat injection. Reuses the
     // round-13 §4.3 / round-14 corrected set the existing
@@ -17677,6 +17721,76 @@ int cmd_subaru_dsc_unblock_sequence(int argc, char *argv[]) {
         0x02, std::chrono::milliseconds{2000});
     if (final_dsc.has_value()) {
         std::fputs("      POSITIVE (50 02). **PHASE C OPEN.**\n", stdout);
+
+        // Round-20 §3 — probe each candidate flash-protocol SID with a
+        // single-byte request and report response. Builds analyst's
+        // round-21 data input on which handlers are reachable in
+        // Programming session.
+        if (probe_flash_services) {
+            std::fputs("\n[6/6] Probing flash-protocol SIDs in Programming "
+                       "session...\n", stdout);
+            std::fflush(stdout);
+            struct SidProbe {
+                std::uint8_t sid;
+                char const  *name;
+            };
+            constexpr std::array<SidProbe, 10> probes{{
+                {0x34U, "RequestDownload"},
+                {0x35U, "RequestUpload"},
+                {0x36U, "TransferData"},
+                {0x37U, "RequestTransferExit"},
+                {0x31U, "RoutineControl"},
+                {0x2EU, "WriteDataByIdentifier"},
+                {0x22U, "ReadDataByIdentifier"},
+                {0x85U, "ControlDTCSetting"},
+                {0xB6U, "SubaruBulkTransfer"},
+                {0x11U, "ECUReset"},
+            }};
+            for (auto const &probe : probes) {
+                std::array<std::uint8_t, 1> const req{probe.sid};
+                auto resp = (*t)->send_recv(std::span<std::uint8_t const>{req},
+                                            std::chrono::milliseconds{1500});
+                if (!resp.has_value()) {
+                    std::fprintf(stdout,
+                                 "      0x%02X (%-22s) -> timeout (not dispatched)\n",
+                                 probe.sid, probe.name);
+                    continue;
+                }
+                auto const &body = resp->data;
+                if (body.empty()) {
+                    std::fprintf(stdout,
+                                 "      0x%02X (%-22s) -> empty response\n",
+                                 probe.sid, probe.name);
+                    continue;
+                }
+                if (body[0] ==
+                    static_cast<std::uint8_t>(probe.sid + 0x40U)) {
+                    std::fprintf(stdout,
+                                 "      0x%02X (%-22s) -> POSITIVE 0x%02X "
+                                 "(handler accepted single-byte!)\n",
+                                 probe.sid, probe.name, body[0]);
+                } else if (body.size() >= 3 && body[0] == 0x7FU &&
+                           body[1] == probe.sid) {
+                    char const *hint =
+                        body[2] == 0x11U ? "serviceNotSupported (SID absent)" :
+                        body[2] == 0x12U ? "subFunctionNotSupported (handler EXISTS)" :
+                        body[2] == 0x13U ? "incorrectMessageLength (handler EXISTS)" :
+                        body[2] == 0x22U ? "conditionsNotCorrect (handler exists)" :
+                        body[2] == 0x31U ? "requestOutOfRange (handler exists)" :
+                        body[2] == 0x33U ? "securityAccessDenied (handler exists, needs SA)" :
+                        body[2] == 0x7EU ? "subFunctionNotSupportedInActiveSession" :
+                                           "(unknown NRC)";
+                    std::fprintf(stdout,
+                                 "      0x%02X (%-22s) -> NRC 0x%02X - %s\n",
+                                 probe.sid, probe.name, body[2], hint);
+                } else {
+                    std::fprintf(stdout,
+                                 "      0x%02X (%-22s) -> unexpected 0x%02X\n",
+                                 probe.sid, probe.name, body[0]);
+                }
+            }
+        }
+
         std::fputc('\n', stdout);
         std::fflush(stdout);
         return 0;
@@ -17720,6 +17834,194 @@ int cmd_subaru_dsc_unblock_sequence(int argc, char *argv[]) {
     std::fputc('\n', stdout);
     std::fflush(stdout);
     return 1;
+}
+
+// cmd_subaru_read_did — UDS 0x22 readDataByIdentifier wrapper.
+// Round-20 §2 deliverable. Sends a single multi-DID request and parses
+// the per-DID response body. Useful for confirming CID / VIN / software
+// stamps in Default or Extended session (no Programming needed).
+//
+// Usage: subuwutuner-cli subaru-read-did 0xF180 0xF181 0xF18C ...
+int cmd_subaru_read_did(int argc, char *argv[]) {
+    std::optional<std::string> transport_kind;
+    std::string dll_path;
+    std::string device_path;
+    bool verbose = false;
+    std::vector<std::uint16_t> dids;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "subaru-read-did: %s requires a value\n",
+                             name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--transport") {
+            if (auto const *v = require_arg("--transport"); v)
+                transport_kind = std::string{v};
+            else
+                return 2;
+        } else if (a == "--device") {
+            if (auto const *v = require_arg("--device"); v)
+                device_path = v;
+            else
+                return 2;
+        } else if (a == "--dll") {
+            if (auto const *v = require_arg("--dll"); v)
+                dll_path = v;
+            else
+                return 2;
+        } else if (a == "--verbose") {
+            verbose = true;
+        } else {
+            // Treat as a DID hex literal (0xNNNN form)
+            char *end = nullptr;
+            auto const val = std::strtoull(argv[i], &end, 0);
+            if (end == argv[i] || *end != '\0' || val > 0xFFFFULL) {
+                std::fprintf(stderr,
+                             "subaru-read-did: unknown option or invalid DID: %s\n",
+                             argv[i]);
+                return 2;
+            }
+            dids.push_back(static_cast<std::uint16_t>(val));
+        }
+    }
+
+    if (!transport_kind.has_value() || dids.empty()) {
+        std::fputs(
+            "subaru-read-did — UDS 0x22 readDataByIdentifier wrapper.\n"
+            "\n"
+            "Usage:\n"
+            "  subuwutuner-cli subaru-read-did --transport obdx --device COM4 \\\n"
+            "      <DID> [<DID> ...]\n"
+            "\n"
+            "Each DID is a 16-bit hex value (e.g. 0xF180). Multiple DIDs are\n"
+            "packed into one request; response is parsed per-DID. Common DIDs:\n"
+            "  0xF180  bootSoftwareIdentification\n"
+            "  0xF181  applicationSoftwareIdentification (likely CID)\n"
+            "  0xF182  applicationDataIdentification\n"
+            "  0xF18A  systemSupplierIdentifier\n"
+            "  0xF18B  ECUManufacturingDate\n"
+            "  0xF18C  ECUSerialNumber\n"
+            "  0xF190  VIN\n"
+            "  0xF195  systemSupplierECUSoftwareVersionNumber\n",
+            stderr);
+        return 2;
+    }
+
+    auto const kind = st::transport::parse_kind(*transport_kind);
+    if (!kind.has_value()) {
+        std::fprintf(stderr,
+                     "subaru-read-did: --transport '%s' not recognized\n",
+                     transport_kind->c_str());
+        return 2;
+    }
+    st::transport::TransportSpec const spec{*kind, dll_path, device_path};
+    auto t = st::transport::open_transport(spec);
+    if (!t.has_value()) {
+        std::fprintf(stderr, "subaru-read-did: %s\n",
+                     t.error().to_string().c_str());
+        return 1;
+    }
+    if (verbose)
+        st::transport::obdx::set_trace_enabled(true);
+    st::transport::LinkConfig const link{st::transport::LinkKind::CanIso15765,
+                                         500000, 0x000007E0, 0x000007E8};
+    if (auto s = (*t)->open(link); !s.has_value()) {
+        std::fprintf(stderr, "subaru-read-did: transport open failed: %s\n",
+                     s.error().to_string().c_str());
+        return 1;
+    }
+
+    // Build request: 0x22 <DID-hi> <DID-lo> ...
+    std::vector<std::uint8_t> req;
+    req.reserve(1U + 2U * dids.size());
+    req.push_back(0x22U);
+    for (auto did : dids) {
+        req.push_back(static_cast<std::uint8_t>((did >> 8) & 0xFFU));
+        req.push_back(static_cast<std::uint8_t>(did & 0xFFU));
+    }
+    auto resp = (*t)->send_recv(req, std::chrono::milliseconds{3000});
+    if (!resp.has_value()) {
+        std::fprintf(stderr, "subaru-read-did: %s\n",
+                     resp.error().to_string().c_str());
+        return 1;
+    }
+    auto const &body = resp->data;
+    if (body.empty()) {
+        std::fputs("subaru-read-did: empty response\n", stderr);
+        return 1;
+    }
+    if (body.size() >= 3 && body[0] == 0x7FU && body[1] == 0x22U) {
+        std::fprintf(stdout, "NEGATIVE: NRC 0x%02X\n", body[2]);
+        return 1;
+    }
+    if (body[0] != 0x62U) {
+        std::fprintf(stderr,
+                     "subaru-read-did: unexpected response prefix 0x%02X\n",
+                     body[0]);
+        return 1;
+    }
+
+    // Parse: walk the body finding each requested DID header.
+    // Body layout: 62 <DID1-hi> <DID1-lo> <data-1>... <DID2-hi> <DID2-lo>...
+    // For each requested DID we find its position then take bytes until
+    // the NEXT requested DID's position (or end of body).
+    std::vector<std::size_t> positions(dids.size(),
+                                       std::numeric_limits<std::size_t>::max());
+    for (std::size_t idx = 0; idx < dids.size(); ++idx) {
+        std::uint8_t const hi =
+            static_cast<std::uint8_t>((dids[idx] >> 8) & 0xFFU);
+        std::uint8_t const lo = static_cast<std::uint8_t>(dids[idx] & 0xFFU);
+        std::size_t search_from = 1;  // skip the 0x62 prefix
+        for (std::size_t prev = 0; prev < idx; ++prev) {
+            if (positions[prev] != std::numeric_limits<std::size_t>::max() &&
+                positions[prev] + 2 > search_from) {
+                search_from = positions[prev] + 2;
+            }
+        }
+        for (std::size_t i = search_from; i + 1 < body.size(); ++i) {
+            if (body[i] == hi && body[i + 1] == lo) {
+                positions[idx] = i;
+                break;
+            }
+        }
+    }
+
+    std::fprintf(stdout, "POSITIVE — %zu DID(s) in response (%zu bytes)\n",
+                 dids.size(), body.size() - 1);
+    for (std::size_t idx = 0; idx < dids.size(); ++idx) {
+        std::fprintf(stdout, "\n  0x%04X:", dids[idx]);
+        if (positions[idx] == std::numeric_limits<std::size_t>::max()) {
+            std::fputs(" (not found in response)\n", stdout);
+            continue;
+        }
+        std::size_t const data_start = positions[idx] + 2;
+        std::size_t data_end = body.size();
+        for (std::size_t other = 0; other < dids.size(); ++other) {
+            if (positions[other] != std::numeric_limits<std::size_t>::max() &&
+                positions[other] > positions[idx] &&
+                positions[other] < data_end) {
+                data_end = positions[other];
+            }
+        }
+        std::fputc('\n', stdout);
+        std::fputs("       hex:", stdout);
+        for (std::size_t i = data_start; i < data_end; ++i)
+            std::fprintf(stdout, " %02X", body[i]);
+        std::fputs("\n       ascii: \"", stdout);
+        for (std::size_t i = data_start; i < data_end; ++i) {
+            std::uint8_t const b = body[i];
+            std::fputc((b >= 0x20 && b < 0x7F) ? static_cast<int>(b) : '.',
+                       stdout);
+        }
+        std::fputs("\"\n", stdout);
+    }
+    std::fputc('\n', stdout);
+    return 0;
 }
 
 // fetching the calibration ID (CAL ID), which lets the user identify
@@ -23801,6 +24103,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "subaru-dsc-unblock-sequence") {
         return cmd_subaru_dsc_unblock_sequence(argc - 2, argv + 2);
+    }
+    if (cmd == "subaru-read-did") {
+        return cmd_subaru_read_did(argc - 2, argv + 2);
     }
     if (cmd == "config") {
         return cmd_config(argc - 2, argv + 2);
