@@ -15482,6 +15482,332 @@ int cmd_subaru_ssm_cmd(int argc, char *argv[]) {
     return 0;
 }
 
+// cmd_subaru_can_id_sweep — round-12 §5.1 brute-force CAN-ID probe.
+//
+// The bench rig is walled at DSC 0x10 0x02 NRC 0x22 because the
+// firmware's 21-byte precondition bitmap at RAM 0xFFF8A6CE..0xFFF8A6EA
+// is all-zero (per round-11 bench probe). Each byte is supposed to be
+// 0x01, set by some external CAN module's broadcast. Round-12 analyst
+// work narrowed the descriptor table to ROM 0x0006FA00 but couldn't
+// resolve the CAN-ID → descriptor link.
+//
+// This verb closes the bench-side end of the search: broadcast each
+// CAN ID in [--start, --end] at the configured --payload, read the
+// 21-byte bitmap between IDs via SSM-A8, and log any IDs that cause
+// bit flips.
+//
+// Wire-bytes per probe:
+//   TX  <can_id>  <payload bytes 8B>          (DVI 0x10 TxSmall)
+//   RX  <none — fire-and-forget>
+//   TX  A8 00 F8 A6 CE F8 A6 CF ... F8 A6 EA  (multi-addr SSM-A8 read)
+//   RX  E8 <21 data bytes>
+//
+// Uses no SA / no DSC — SSM-A8 is bench-confirmed to work in the
+// default session (round-10 implementer pickup). The transport's
+// configured tester ID is 0x7E0 for the SSM-A8 reads; broadcasts go
+// to the per-iteration `can_id` via send_to().
+int cmd_subaru_can_id_sweep(int argc, char *argv[]) {
+    std::optional<std::string> transport_kind;
+    std::string dll_path;
+    std::string device_path;
+    std::uint32_t start_id = 0x100U;
+    std::uint32_t end_id = 0x600U;
+    std::vector<std::uint8_t> payload{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    std::chrono::milliseconds settle_ms{50};
+    bool verbose = false;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "subaru-can-id-sweep: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--transport") {
+            if (auto const *v = require_arg("--transport"); v)
+                transport_kind = std::string{v};
+            else
+                return 2;
+        } else if (a == "--device") {
+            if (auto const *v = require_arg("--device"); v)
+                device_path = v;
+            else
+                return 2;
+        } else if (a == "--dll") {
+            if (auto const *v = require_arg("--dll"); v)
+                dll_path = v;
+            else
+                return 2;
+        } else if (a == "--start") {
+            auto const *v = require_arg("--start");
+            if (v == nullptr)
+                return 2;
+            std::string_view sv{v};
+            int base = 10;
+            if (sv.starts_with("0x") || sv.starts_with("0X")) {
+                sv.remove_prefix(2);
+                base = 16;
+            }
+            char *end = nullptr;
+            auto const val = std::strtoull(sv.data(), &end, base);
+            if (end == sv.data() || val > 0x1FFFFFFFULL) {
+                std::fputs("subaru-can-id-sweep: --start must be a CAN ID (max 0x1FFFFFFF)\n",
+                           stderr);
+                return 2;
+            }
+            start_id = static_cast<std::uint32_t>(val);
+        } else if (a == "--end") {
+            auto const *v = require_arg("--end");
+            if (v == nullptr)
+                return 2;
+            std::string_view sv{v};
+            int base = 10;
+            if (sv.starts_with("0x") || sv.starts_with("0X")) {
+                sv.remove_prefix(2);
+                base = 16;
+            }
+            char *end = nullptr;
+            auto const val = std::strtoull(sv.data(), &end, base);
+            if (end == sv.data() || val > 0x1FFFFFFFULL) {
+                std::fputs("subaru-can-id-sweep: --end must be a CAN ID (max 0x1FFFFFFF)\n",
+                           stderr);
+                return 2;
+            }
+            end_id = static_cast<std::uint32_t>(val);
+        } else if (a == "--payload") {
+            auto const *v = require_arg("--payload");
+            if (v == nullptr)
+                return 2;
+            std::string_view sv{v};
+            payload.clear();
+            std::uint8_t nibble = 0;
+            int nibble_count = 0;
+            for (char c : sv) {
+                if (c == ' ' || c == '\t')
+                    continue;
+                std::uint8_t n;
+                if (c >= '0' && c <= '9')
+                    n = static_cast<std::uint8_t>(c - '0');
+                else if (c >= 'a' && c <= 'f')
+                    n = static_cast<std::uint8_t>(c - 'a' + 10);
+                else if (c >= 'A' && c <= 'F')
+                    n = static_cast<std::uint8_t>(c - 'A' + 10);
+                else {
+                    std::fprintf(stderr,
+                                 "subaru-can-id-sweep: --payload non-hex char '%c'\n", c);
+                    return 2;
+                }
+                nibble = static_cast<std::uint8_t>((nibble << 4) | n);
+                ++nibble_count;
+                if (nibble_count == 2) {
+                    payload.push_back(nibble);
+                    nibble = 0;
+                    nibble_count = 0;
+                }
+            }
+            if (nibble_count != 0) {
+                std::fputs("subaru-can-id-sweep: --payload needs full hex bytes\n", stderr);
+                return 2;
+            }
+            if (payload.size() > 8U) {
+                std::fputs("subaru-can-id-sweep: --payload max 8 bytes (single CAN frame)\n",
+                           stderr);
+                return 2;
+            }
+        } else if (a == "--settle-ms") {
+            auto const *v = require_arg("--settle-ms");
+            if (v == nullptr)
+                return 2;
+            char *end = nullptr;
+            auto const val = std::strtoull(v, &end, 10);
+            if (end == v || *end != '\0' || val == 0 || val > 5000ULL) {
+                std::fputs("subaru-can-id-sweep: --settle-ms must be 1..5000\n", stderr);
+                return 2;
+            }
+            settle_ms = std::chrono::milliseconds{static_cast<std::int64_t>(val)};
+        } else if (a == "--verbose") {
+            verbose = true;
+        } else {
+            std::fprintf(stderr, "subaru-can-id-sweep: unknown option: %s\n", argv[i]);
+            return 2;
+        }
+    }
+
+    if (!transport_kind.has_value()) {
+        std::fputs(
+            "subaru-can-id-sweep — round-12 brute-force CAN-ID probe.\n"
+            "\n"
+            "Broadcasts each CAN ID in [--start, --end] with --payload, reads the\n"
+            "21-byte DSC precondition bitmap at RAM 0xFFF8A6CE..0xFFF8A6EA via\n"
+            "SSM-A8 between IDs, and logs IDs that flip any bit.\n"
+            "\n"
+            "Usage:\n"
+            "  subuwutuner-cli subaru-can-id-sweep --transport obdx --device COM4 \\\n"
+            "      [--start 0x100] [--end 0x600] [--payload FFFFFFFFFFFFFFFF] \\\n"
+            "      [--settle-ms 50] [--verbose]\n",
+            stderr);
+        return 2;
+    }
+    if (start_id > end_id) {
+        std::fputs("subaru-can-id-sweep: --start must be <= --end\n", stderr);
+        return 2;
+    }
+
+    auto const kind = st::transport::parse_kind(*transport_kind);
+    if (!kind.has_value()) {
+        std::fprintf(stderr, "subaru-can-id-sweep: --transport '%s' not recognized\n",
+                     transport_kind->c_str());
+        return 2;
+    }
+    st::transport::TransportSpec const spec{*kind, dll_path, device_path};
+    auto t = st::transport::open_transport(spec);
+    if (!t.has_value()) {
+        std::fprintf(stderr, "subaru-can-id-sweep: %s\n", t.error().to_string().c_str());
+        return 1;
+    }
+    if (verbose)
+        st::transport::obdx::set_trace_enabled(true);
+    st::transport::LinkConfig const link{st::transport::LinkKind::CanIso15765, 500000,
+                                         0x000007E0, 0x000007E8};
+    if (auto s = (*t)->open(link); !s.has_value()) {
+        std::fprintf(stderr, "subaru-can-id-sweep: transport open failed: %s\n",
+                     s.error().to_string().c_str());
+        return 1;
+    }
+
+    st::ecu::ssm::SsmClient ssm{**t, st::ecu::ssm::Framing::IsoTp};
+
+    // Build the 29-address read covering 0xFFF8A6CE..0xFFF8A6EA (21
+    // DSC-relevant bytes + 8 gap bytes for context).
+    std::vector<std::uint32_t> bitmap_addrs;
+    bitmap_addrs.reserve(29U);
+    for (std::uint32_t off = 0xCE; off <= 0xEA; ++off) {
+        bitmap_addrs.push_back(0x00F8A600U | off);
+    }
+
+    auto read_bitmap = [&]() -> std::optional<std::vector<std::uint8_t>> {
+        auto r = ssm.read(bitmap_addrs, std::chrono::milliseconds{2000});
+        if (!r.has_value()) {
+            std::fprintf(stderr,
+                         "subaru-can-id-sweep: bitmap read failed: %s\n",
+                         r.error().to_string().c_str());
+            return std::nullopt;
+        }
+        return std::move(*r);
+    };
+
+    std::fprintf(stdout, "Baseline read...\n");
+    auto baseline = read_bitmap();
+    if (!baseline.has_value())
+        return 1;
+    std::uint32_t set_count = 0;
+    for (auto b : *baseline)
+        if (b == 0x01)
+            ++set_count;
+    std::fprintf(stdout, "Baseline: %u / %zu bytes already 0x01\n",
+                 set_count, baseline->size());
+
+    std::fprintf(stdout, "Sweep CAN IDs 0x%03X .. 0x%03X (%u IDs)\n",
+                 start_id, end_id, end_id - start_id + 1);
+    std::fprintf(stdout,
+                 "Payload: %zu bytes  Settle: %lld ms\n",
+                 payload.size(),
+                 settle_ms.count());
+
+    // Periodic-slot setup: stage slot 0 once with a fast interval, then
+    // hot-swap the CAN ID via update_periodic_slot_data() between IDs.
+    // This is the same TX path used by cmd_flash_apply's vehicle-presence
+    // injection (proven on the bench). Fire-and-forget TxSmall via
+    // send_to() was tried first but the OBDX VX firmware on this bench
+    // doesn't ACK that opcode reliably.
+    if (!(*t)->supports_periodic_slots()) {
+        std::fputs("subaru-can-id-sweep: transport does not support periodic slots\n",
+                   stderr);
+        return 1;
+    }
+    {
+        st::transport::ITransport::PeriodicSlot const slot{
+            /*index=*/0,
+            /*can_id=*/start_id,
+            /*data=*/std::span<std::uint8_t const>{payload},
+            /*interval_ms=*/10,
+        };
+        if (auto s = (*t)->set_periodic_slot(slot); !s.has_value()) {
+            std::fprintf(stderr,
+                         "subaru-can-id-sweep: set_periodic_slot failed: %s\n",
+                         s.error().to_string().c_str());
+            return 1;
+        }
+        if (auto s = (*t)->enable_periodic_slot(0, true); !s.has_value()) {
+            std::fprintf(stderr,
+                         "subaru-can-id-sweep: enable_periodic_slot failed: %s\n",
+                         s.error().to_string().c_str());
+            return 1;
+        }
+    }
+
+    std::uint32_t hits = 0;
+    std::uint32_t last_progress = start_id;
+    for (std::uint32_t id = start_id; id <= end_id; ++id) {
+        // Hot-swap the slot to broadcast this ID.
+        if (auto s = (*t)->update_periodic_slot_data(0, id, payload); !s.has_value()) {
+            std::fprintf(stderr,
+                         "subaru-can-id-sweep: update_periodic_slot_data(0x%X) failed: %s\n",
+                         id, s.error().to_string().c_str());
+            (void)(*t)->clear_all_periodic_slots();
+            return 1;
+        }
+        std::this_thread::sleep_for(settle_ms);
+
+        // Read the bitmap.
+        auto current = read_bitmap();
+        if (!current.has_value())
+            return 1;
+
+        // Diff against baseline: any byte that flipped from 0x00 to a
+        // non-zero (or, more importantly, to 0x01)?
+        std::vector<std::size_t> flipped;
+        for (std::size_t i = 0; i < current->size(); ++i) {
+            if ((*current)[i] != (*baseline)[i]) {
+                flipped.push_back(i);
+            }
+        }
+        if (!flipped.empty()) {
+            std::fprintf(stdout, "HIT: CAN ID 0x%03X flips %zu byte(s):", id, flipped.size());
+            for (auto i : flipped) {
+                std::uint32_t addr = 0xFFF8A6CEU + static_cast<std::uint32_t>(i);
+                std::fprintf(stdout, " 0x%08X (%02X -> %02X)",
+                             addr, (*baseline)[i], (*current)[i]);
+            }
+            std::fputc('\n', stdout);
+            ++hits;
+            // Update baseline so we report only NEW changes from each ID.
+            baseline = std::move(*current);
+        }
+
+        // Progress every 64 IDs (every ~10 sec at 150ms/ID).
+        if (id - last_progress >= 0x40U) {
+            std::fprintf(stdout, "  ... at 0x%03X, %u hits so far\n", id, hits);
+            std::fflush(stdout);
+            last_progress = id;
+        }
+    }
+
+    // Tear down periodic injection.
+    (void)(*t)->clear_all_periodic_slots();
+
+    std::fprintf(stdout, "\nSweep complete. Total hits: %u\n", hits);
+    set_count = 0;
+    for (auto b : *baseline)
+        if (b == 0x01)
+            ++set_count;
+    std::fprintf(stdout, "Final bitmap state: %u / %zu bytes 0x01\n",
+                 set_count, baseline->size());
+    return 0;
+}
+
 // fetching the calibration ID (CAL ID), which lets the user identify
 // which tune is currently active on the ECU without dumping the full
 // ROM. Mode 09 is in the default session and SA-free, so the command
@@ -21543,6 +21869,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "subaru-ssm-cmd") {
         return cmd_subaru_ssm_cmd(argc - 2, argv + 2);
+    }
+    if (cmd == "subaru-can-id-sweep") {
+        return cmd_subaru_can_id_sweep(argc - 2, argv + 2);
     }
     if (cmd == "config") {
         return cmd_config(argc - 2, argv + 2);
