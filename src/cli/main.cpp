@@ -16924,6 +16924,7 @@ int cmd_subaru_dsc_unblock_sequence(int argc, char *argv[]) {
     bool burst_write = false;
     bool burst_write_extended = false;
     bool probe_flash_services = false;
+    bool probe_flash_services_extended = false;
     bool sa_l3 = false;
     bool test_flash_download = false;
     bool force = false;
@@ -16967,6 +16968,9 @@ int cmd_subaru_dsc_unblock_sequence(int argc, char *argv[]) {
             burst_write_extended = true;
         } else if (a == "--probe-flash-services") {
             probe_flash_services = true;
+        } else if (a == "--probe-flash-services-extended") {
+            probe_flash_services = true;
+            probe_flash_services_extended = true;
         } else if (a == "--sa-l3") {
             sa_l3 = true;
         } else if (a == "--test-flash-download") {
@@ -17042,6 +17046,12 @@ int cmd_subaru_dsc_unblock_sequence(int argc, char *argv[]) {
             "                    and log the response. Builds the round-21\n"
             "                    analyst's data input on which flash services\n"
             "                    are reachable post-Phase-C.\n"
+            "  --probe-flash-services-extended\n"
+            "                    Round-24: like --probe-flash-services but also\n"
+            "                    probes older Subaru flash SIDs {0xAF, 0xBA, 0xBB,\n"
+            "                    0xBC, 0xBD, 0xBE, 0xBF}. Helps find the real\n"
+            "                    bulk-transfer handler (round-24 found 0xC5E22 is\n"
+            "                    the 0x37 handler, not 0xB6).\n"
             "  --sa-l3           Round-21: after DSC 0x10 0x02 grant, attempt SA L3\n"
             "                    (27 03 seed + ssmcan1_l3_aftermarket key + 27 04).\n"
             "                    Needed before 0x31/0x34/0x37/0xB6 will accept\n"
@@ -17904,6 +17914,15 @@ int cmd_subaru_dsc_unblock_sequence(int argc, char *argv[]) {
                 std::uint8_t sid;
                 char const  *name;
             };
+            constexpr std::array<SidProbe, 7> extra_probes{{
+                {0xAFU, "ReadDTCByStatusMask?"},
+                {0xBAU, "SubaruFlashCmd_BA?"},
+                {0xBBU, "SubaruFlashCmd_BB?"},
+                {0xBCU, "SubaruFlashCmd_BC?"},
+                {0xBDU, "SubaruFlashCmd_BD?"},
+                {0xBEU, "SubaruFlashCmd_BE?"},
+                {0xBFU, "SubaruFlashCmd_BF?"},
+            }};
             constexpr std::array<SidProbe, 10> probes{{
                 {0x34U, "RequestDownload"},
                 {0x35U, "RequestUpload"},
@@ -17916,7 +17935,7 @@ int cmd_subaru_dsc_unblock_sequence(int argc, char *argv[]) {
                 {0xB6U, "SubaruBulkTransfer"},
                 {0x11U, "ECUReset"},
             }};
-            for (auto const &probe : probes) {
+            auto const probe_one = [&](SidProbe const &probe) {
                 std::array<std::uint8_t, 1> const req{probe.sid};
                 auto resp = (*t)->send_recv(std::span<std::uint8_t const>{req},
                                             std::chrono::milliseconds{1500});
@@ -17924,14 +17943,14 @@ int cmd_subaru_dsc_unblock_sequence(int argc, char *argv[]) {
                     std::fprintf(stdout,
                                  "      0x%02X (%-22s) -> timeout (not dispatched)\n",
                                  probe.sid, probe.name);
-                    continue;
+                    return;
                 }
                 auto const &body = resp->data;
                 if (body.empty()) {
                     std::fprintf(stdout,
                                  "      0x%02X (%-22s) -> empty response\n",
                                  probe.sid, probe.name);
-                    continue;
+                    return;
                 }
                 if (body[0] ==
                     static_cast<std::uint8_t>(probe.sid + 0x40U)) {
@@ -17958,6 +17977,14 @@ int cmd_subaru_dsc_unblock_sequence(int argc, char *argv[]) {
                                  "      0x%02X (%-22s) -> unexpected 0x%02X\n",
                                  probe.sid, probe.name, body[0]);
                 }
+            };
+            for (auto const &probe : probes)
+                probe_one(probe);
+            if (probe_flash_services_extended) {
+                std::fputs("\n      -- extended probe (round-24 §2 candidates) --\n",
+                           stdout);
+                for (auto const &probe : extra_probes)
+                    probe_one(probe);
             }
         }
 
@@ -18741,6 +18768,195 @@ int cmd_subaru_flash_bulk_transfer(int argc, char *argv[]) {
             body[2] == 0x22U ? "conditionsNotCorrect (sentinel/cipher gate?)" :
             body[2] == 0x31U ? "requestOutOfRange (addr / format mismatch)" :
             body[2] == 0x33U ? "securityAccessDenied" :
+                               "(unknown NRC)";
+        std::fprintf(stdout, "NEGATIVE: NRC 0x%02X — %s\n", body[2], hint);
+        return 1;
+    }
+    std::fprintf(stdout, "UNEXPECTED response 0x%02X\n", body[0]);
+    return 1;
+}
+
+// cmd_subaru_uds_rmba — UDS 0x23 ReadMemoryByAddress wrapper.
+// Round-24 §1 deliverable. Handler at ROM 0x000BEAC0 (round-18 §3 slot
+// 15, shared with SID 0x3D), SA-gated. Used to probe RAM cells that
+// SSM-A8 can't reach — e.g. 0xFFF9C0F4 between 0x34 and 0xB6 (round-24
+// critical data point).
+int cmd_subaru_uds_rmba(int argc, char *argv[]) {
+    std::optional<std::string> transport_kind;
+    std::string dll_path;
+    std::string device_path;
+    std::optional<std::uint32_t> addr;
+    std::optional<std::uint32_t> length;
+    std::uint8_t alfid = 0x14U;
+    bool verbose = false;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "subaru-uds-rmba: %s requires a value\n",
+                             name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--transport") {
+            if (auto const *v = require_arg("--transport"); v)
+                transport_kind = std::string{v};
+            else
+                return 2;
+        } else if (a == "--device") {
+            if (auto const *v = require_arg("--device"); v)
+                device_path = v;
+            else
+                return 2;
+        } else if (a == "--dll") {
+            if (auto const *v = require_arg("--dll"); v)
+                dll_path = v;
+            else
+                return 2;
+        } else if (a == "--addr") {
+            auto const *v = require_arg("--addr");
+            if (v == nullptr) return 2;
+            char *end = nullptr;
+            auto const val = std::strtoull(v, &end, 0);
+            if (end == v || *end != '\0' || val > 0xFFFFFFFFULL) {
+                std::fputs("subaru-uds-rmba: --addr must be a 32-bit address\n",
+                           stderr);
+                return 2;
+            }
+            addr = static_cast<std::uint32_t>(val);
+        } else if (a == "--length") {
+            auto const *v = require_arg("--length");
+            if (v == nullptr) return 2;
+            char *end = nullptr;
+            auto const val = std::strtoull(v, &end, 0);
+            if (end == v || *end != '\0' || val == 0 || val > 0xFFULL) {
+                std::fputs("subaru-uds-rmba: --length must be 1..255 "
+                           "(ALFID 0x14 carries 1-byte length)\n", stderr);
+                return 2;
+            }
+            length = static_cast<std::uint32_t>(val);
+        } else if (a == "--alfid") {
+            auto const *v = require_arg("--alfid");
+            if (v == nullptr) return 2;
+            char *end = nullptr;
+            auto const val = std::strtoull(v, &end, 0);
+            if (end == v || *end != '\0' || val > 0xFFULL) {
+                std::fputs("subaru-uds-rmba: --alfid must be a hex byte\n",
+                           stderr);
+                return 2;
+            }
+            alfid = static_cast<std::uint8_t>(val);
+        } else if (a == "--verbose") {
+            verbose = true;
+        } else {
+            std::fprintf(stderr, "subaru-uds-rmba: unknown option: %s\n",
+                         argv[i]);
+            return 2;
+        }
+    }
+
+    if (!transport_kind.has_value() || !addr.has_value() ||
+        !length.has_value()) {
+        std::fputs(
+            "subaru-uds-rmba — UDS 0x23 ReadMemoryByAddress wrapper.\n"
+            "\n"
+            "Usage:\n"
+            "  subuwutuner-cli subaru-uds-rmba \\\n"
+            "      --transport obdx --device COM4 \\\n"
+            "      --addr 0xFFF9C0F4 --length 4 [--alfid 0x14]\n"
+            "\n"
+            "Default ALFID 0x14 = 4-byte addr + 1-byte length. Handler is\n"
+            "SA-gated (round-18 §3 slot 15 shared with 0x3D); caller must\n"
+            "have SA L1 active. Useful for cells SSM-A8 doesn't reach.\n",
+            stderr);
+        return 2;
+    }
+
+    auto const kind = st::transport::parse_kind(*transport_kind);
+    if (!kind.has_value()) {
+        std::fprintf(stderr, "subaru-uds-rmba: --transport '%s' not recognized\n",
+                     transport_kind->c_str());
+        return 2;
+    }
+    st::transport::TransportSpec const spec{*kind, dll_path, device_path};
+    auto t = st::transport::open_transport(spec);
+    if (!t.has_value()) {
+        std::fprintf(stderr, "subaru-uds-rmba: %s\n",
+                     t.error().to_string().c_str());
+        return 1;
+    }
+    if (verbose)
+        st::transport::obdx::set_trace_enabled(true);
+    st::transport::LinkConfig const link{st::transport::LinkKind::CanIso15765,
+                                         500000, 0x000007E0, 0x000007E8};
+    if (auto s = (*t)->open(link); !s.has_value()) {
+        std::fprintf(stderr, "subaru-uds-rmba: transport open failed: %s\n",
+                     s.error().to_string().c_str());
+        return 1;
+    }
+
+    // Build request per ALFID per ISO 14229-1 §14.4.2.2:
+    //   low nibble  = number of memoryAddress bytes
+    //   high nibble = number of memorySize bytes
+    // So ALFID 0x14 = 4-byte address + 1-byte size.
+    std::vector<std::uint8_t> req;
+    req.push_back(0x23U);
+    req.push_back(alfid);
+    std::uint8_t const addr_bytes = alfid & 0x0FU;
+    std::uint8_t const size_bytes = (alfid >> 4) & 0x0FU;
+    if (addr_bytes == 0 || addr_bytes > 4 || size_bytes == 0 ||
+        size_bytes > 4) {
+        std::fprintf(stderr,
+                     "subaru-uds-rmba: ALFID 0x%02X out of supported range "
+                     "(addr 1-4 + size 1-4 bytes)\n", alfid);
+        return 2;
+    }
+    for (int i = addr_bytes - 1; i >= 0; --i)
+        req.push_back(static_cast<std::uint8_t>((*addr >> (i * 8)) & 0xFFU));
+    for (int i = size_bytes - 1; i >= 0; --i)
+        req.push_back(static_cast<std::uint8_t>((*length >> (i * 8)) & 0xFFU));
+
+    std::fputs("subaru-uds-rmba: sending", stdout);
+    for (auto b : req)
+        std::fprintf(stdout, " %02X", b);
+    std::fputc('\n', stdout);
+    std::fflush(stdout);
+
+    auto resp = (*t)->send_recv(std::span<std::uint8_t const>{req},
+                                std::chrono::milliseconds{3000});
+    if (!resp.has_value()) {
+        std::fprintf(stderr, "subaru-uds-rmba: %s\n",
+                     resp.error().to_string().c_str());
+        return 1;
+    }
+    auto const &body = resp->data;
+    if (body.empty()) {
+        std::fputs("subaru-uds-rmba: empty response\n", stderr);
+        return 1;
+    }
+    if (body[0] == 0x63U) {
+        std::fputs("POSITIVE (0x63) — data:", stdout);
+        for (std::size_t i = 1; i < body.size(); ++i)
+            std::fprintf(stdout, " %02X", body[i]);
+        std::fputc('\n', stdout);
+        std::fputs("ascii: \"", stdout);
+        for (std::size_t i = 1; i < body.size(); ++i) {
+            std::uint8_t const b = body[i];
+            std::fputc((b >= 0x20 && b < 0x7F) ? static_cast<int>(b) : '.',
+                       stdout);
+        }
+        std::fputs("\"\n", stdout);
+        return 0;
+    }
+    if (body.size() >= 3 && body[0] == 0x7FU && body[1] == 0x23U) {
+        char const *hint =
+            body[2] == 0x12U ? "subFunctionNotSupported" :
+            body[2] == 0x13U ? "incorrectMessageLength" :
+            body[2] == 0x22U ? "conditionsNotCorrect" :
+            body[2] == 0x31U ? "requestOutOfRange (addr blocked or ALFID mismatch)" :
+            body[2] == 0x33U ? "securityAccessDenied (need SA active)" :
                                "(unknown NRC)";
         std::fprintf(stdout, "NEGATIVE: NRC 0x%02X — %s\n", body[2], hint);
         return 1;
@@ -24840,6 +25056,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "subaru-flash-bulk-transfer") {
         return cmd_subaru_flash_bulk_transfer(argc - 2, argv + 2);
+    }
+    if (cmd == "subaru-uds-rmba") {
+        return cmd_subaru_uds_rmba(argc - 2, argv + 2);
     }
     if (cmd == "config") {
         return cmd_config(argc - 2, argv + 2);
