@@ -16924,6 +16924,8 @@ int cmd_subaru_dsc_unblock_sequence(int argc, char *argv[]) {
     bool burst_write = false;
     bool burst_write_extended = false;
     bool probe_flash_services = false;
+    bool sa_l3 = false;
+    bool test_flash_download = false;
     bool force = false;
     bool verbose = false;
 
@@ -16965,6 +16967,10 @@ int cmd_subaru_dsc_unblock_sequence(int argc, char *argv[]) {
             burst_write_extended = true;
         } else if (a == "--probe-flash-services") {
             probe_flash_services = true;
+        } else if (a == "--sa-l3") {
+            sa_l3 = true;
+        } else if (a == "--test-flash-download") {
+            test_flash_download = true;
         } else if (a == "--force") {
             force = true;
         } else if (a == "--with-heartbeats") {
@@ -17036,6 +17042,17 @@ int cmd_subaru_dsc_unblock_sequence(int argc, char *argv[]) {
             "                    and log the response. Builds the round-21\n"
             "                    analyst's data input on which flash services\n"
             "                    are reachable post-Phase-C.\n"
+            "  --sa-l3           Round-21: after DSC 0x10 0x02 grant, attempt SA L3\n"
+            "                    (27 03 seed + ssmcan1_l3_aftermarket key + 27 04).\n"
+            "                    Needed before 0x31/0x34/0x37/0xB6 will accept\n"
+            "                    (parallel dispatch table level flag 0xB5).\n"
+            "  --test-flash-download\n"
+            "                    Round-21 §1.3: after --sa-l3, try UDS 0x34\n"
+            "                    RequestDownload at scratch addr 0x008000 / 0x80 B\n"
+            "                    in both wire-address modes (raw + subaru-plus-01)\n"
+            "                    to determine which the firmware accepts. If 0x74\n"
+            "                    positive, sends 0x37 to close cleanly. Phase D\n"
+            "                    open if either mode grants.\n"
             "  --force           Skip the pre-flight session-state check (which\n"
             "                    refuses to run if the ECU is already in\n"
             "                    Programming from a prior run).\n"
@@ -17721,6 +17738,159 @@ int cmd_subaru_dsc_unblock_sequence(int argc, char *argv[]) {
         0x02, std::chrono::milliseconds{2000});
     if (final_dsc.has_value()) {
         std::fputs("      POSITIVE (50 02). **PHASE C OPEN.**\n", stdout);
+
+        // Round-21 §1.1 — SA L3 inside Programming session.
+        // Parallel dispatch table (round-21 §4) gates 0x34/0x37/0xB6/0x31
+        // on level flag 0xB5 = SA L3. Without this step those SIDs all
+        // respond NRC 0x33 even with L1 held.
+        bool sa_l3_active = false;
+        if (sa_l3) {
+            std::fputs("\n[6/N] SA L3 inside Programming...\n", stdout);
+            std::fflush(stdout);
+            auto seed_l3 = uds.security_access_request_seed(
+                0x03U, std::chrono::milliseconds{1500});
+            if (!seed_l3.has_value()) {
+                std::fprintf(stdout, "      requestSeed FAILED: %s\n"
+                                     "      (Round-22 follow-up: SA L3 may need "
+                                     "to be granted in Extended before DSC 0x10 0x02.)\n",
+                             seed_l3.error().to_string().c_str());
+            } else {
+                std::fprintf(stdout, "      requestSeed OK: %zu byte seed\n",
+                             seed_l3->size());
+                auto key_l3 = st::ecu::subaru::ssmcan1_l3_aftermarket(*seed_l3);
+                if (!key_l3.has_value()) {
+                    std::fprintf(stdout, "      key derivation FAILED: %s\n",
+                                 key_l3.error().to_string().c_str());
+                } else if (auto s = uds.security_access_send_key(
+                               0x04U, *key_l3, std::chrono::milliseconds{1500});
+                           !s.has_value()) {
+                    std::fprintf(stdout, "      sendKey FAILED: %s\n",
+                                 s.error().to_string().c_str());
+                } else {
+                    std::fputs("      sendKey OK (67 04). SA L3 active inside "
+                               "Programming.\n", stdout);
+                    sa_l3_active = true;
+                }
+            }
+        }
+
+        // Round-21 §1.3 — try UDS 0x34 RequestDownload in both wire-address
+        // conventions to determine which the firmware accepts. Per analyst
+        // §3, the disasm at 0x000018F0..1908 left the convention ambiguous;
+        // one of mode "raw" (req[3..5] = ROM offset low 24b) or mode
+        // "subaru-plus-01" (req[3] = 0x01, req[4..5] = offset[15:0]) will
+        // grant 0x74; the other will NRC 0x31. Closes the open question.
+        //
+        // Safe: 0x34 alone is negotiation only — no flash bytes written
+        // without a subsequent 0xB6 or 0x36. After a positive 0x74 we send
+        // 0x37 RequestTransferExit to cleanly close the negotiated download.
+        if (test_flash_download) {
+            std::fputs("\n[7/N] UDS 0x34 RequestDownload — wire-mode determination\n",
+                       stdout);
+            if (!sa_l3_active) {
+                std::fputs("      WARNING: --sa-l3 was not run (or failed) "
+                           "earlier. Expecting NRC 0x33.\n", stdout);
+            }
+            std::fflush(stdout);
+
+            constexpr std::uint32_t kScratchAddr = 0x008000U;
+            constexpr std::uint16_t kScratchLen = 0x0080U;
+            struct WireMode {
+                char const   *label;
+                std::uint8_t  addr_hi;
+                std::uint8_t  addr_mid;
+                std::uint8_t  addr_lo;
+            };
+            std::array<WireMode, 2> const modes{{
+                {"raw            (req[3..5] = ROM offset low 24b)",
+                 static_cast<std::uint8_t>((kScratchAddr >> 16) & 0xFFU),
+                 static_cast<std::uint8_t>((kScratchAddr >> 8) & 0xFFU),
+                 static_cast<std::uint8_t>(kScratchAddr & 0xFFU)},
+                {"subaru-plus-01 (req[3]=0x01, req[4..5]=offset[15:0])",
+                 0x01U,
+                 static_cast<std::uint8_t>((kScratchAddr >> 8) & 0xFFU),
+                 static_cast<std::uint8_t>(kScratchAddr & 0xFFU)},
+            }};
+
+            bool any_accepted = false;
+            for (auto const &m : modes) {
+                std::array<std::uint8_t, 9> const req{
+                    0x34U, 0x04U, 0x33U,
+                    m.addr_hi, m.addr_mid, m.addr_lo,
+                    0x00U,
+                    static_cast<std::uint8_t>((kScratchLen >> 8) & 0xFFU),
+                    static_cast<std::uint8_t>(kScratchLen & 0xFFU)};
+                std::fprintf(stdout, "      mode %s\n", m.label);
+                std::fprintf(stdout,
+                             "        wire: 34 04 33 %02X %02X %02X 00 %02X %02X\n",
+                             m.addr_hi, m.addr_mid, m.addr_lo,
+                             (kScratchLen >> 8) & 0xFFU,
+                             kScratchLen & 0xFFU);
+                auto resp = (*t)->send_recv(std::span<std::uint8_t const>{req},
+                                            std::chrono::milliseconds{2000});
+                if (!resp.has_value()) {
+                    std::fprintf(stdout, "        timeout: %s\n",
+                                 resp.error().to_string().c_str());
+                    continue;
+                }
+                auto const &body = resp->data;
+                if (body.empty()) {
+                    std::fputs("        empty response\n", stdout);
+                    continue;
+                }
+                if (body[0] == 0x74U) {
+                    std::fputs("        POSITIVE 0x74 — this mode is the wire "
+                               "convention. Phase D OPEN.\n", stdout);
+                    std::fputs("        body:", stdout);
+                    for (std::size_t i = 1; i < body.size(); ++i) {
+                        std::fprintf(stdout, " %02X", body[i]);
+                    }
+                    std::fputc('\n', stdout);
+                    any_accepted = true;
+
+                    // Cleanly close the negotiated download — 0x37
+                    // RequestTransferExit with no payload should accept
+                    // post-0x34. Per round-20 probe, 0x37 returned NRC 0x22
+                    // when sent without prior 0x34; conditions are now correct.
+                    std::array<std::uint8_t, 1> const exit_req{0x37U};
+                    auto exit_resp = (*t)->send_recv(
+                        std::span<std::uint8_t const>{exit_req},
+                        std::chrono::milliseconds{2000});
+                    if (exit_resp.has_value() && !exit_resp->data.empty()) {
+                        auto const &eb = exit_resp->data;
+                        if (eb[0] == 0x77U) {
+                            std::fputs("        0x37 close: OK (77).\n", stdout);
+                        } else if (eb.size() >= 3 && eb[0] == 0x7FU) {
+                            std::fprintf(stdout,
+                                         "        0x37 close: NRC 0x%02X "
+                                         "(ECU will timeout cleanly).\n",
+                                         eb[2]);
+                        } else {
+                            std::fprintf(stdout, "        0x37 close: 0x%02X\n",
+                                         eb[0]);
+                        }
+                    }
+                    break;
+                }
+                if (body.size() >= 3 && body[0] == 0x7FU && body[1] == 0x34U) {
+                    char const *hint =
+                        body[2] == 0x12U ? "subFunctionNotSupported" :
+                        body[2] == 0x13U ? "incorrectMessageLength" :
+                        body[2] == 0x22U ? "conditionsNotCorrect" :
+                        body[2] == 0x31U ? "requestOutOfRange (wrong wire mode)" :
+                        body[2] == 0x33U ? "securityAccessDenied (SA L3 needed)" :
+                                           "(unknown NRC)";
+                    std::fprintf(stdout, "        NRC 0x%02X — %s\n",
+                                 body[2], hint);
+                } else {
+                    std::fprintf(stdout, "        unexpected 0x%02X\n", body[0]);
+                }
+            }
+            if (!any_accepted) {
+                std::fputs("      Neither wire mode accepted by handler.\n",
+                           stdout);
+            }
+        }
 
         // Round-20 §3 — probe each candidate flash-protocol SID with a
         // single-byte request and report response. Builds analyst's
