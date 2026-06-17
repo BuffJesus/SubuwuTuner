@@ -18521,6 +18521,7 @@ int cmd_subaru_flash_bulk_transfer(int argc, char *argv[]) {
     std::string device_path;
     std::optional<std::uint32_t> addr;
     std::string data_hex;
+    std::string raw_payload_hex;
     bool verbose = false;
 
     for (int i = 0; i < argc; ++i) {
@@ -18565,6 +18566,11 @@ int cmd_subaru_flash_bulk_transfer(int argc, char *argv[]) {
                 data_hex = v;
             else
                 return 2;
+        } else if (a == "--raw-payload") {
+            if (auto const *v = require_arg("--raw-payload"); v)
+                raw_payload_hex = v;
+            else
+                return 2;
         } else if (a == "--zeros") {
             // Convenience: --zeros <count>
             auto const *v = require_arg("--zeros");
@@ -18587,7 +18593,9 @@ int cmd_subaru_flash_bulk_transfer(int argc, char *argv[]) {
         }
     }
 
-    if (!transport_kind.has_value() || !addr.has_value() || data_hex.empty()) {
+    bool const using_raw = !raw_payload_hex.empty();
+    if (!transport_kind.has_value() ||
+        (!using_raw && (!addr.has_value() || data_hex.empty()))) {
         std::fputs(
             "subaru-flash-bulk-transfer — UDS 0xB6 SubaruBulkTransfer wrapper.\n"
             "\n"
@@ -18597,37 +18605,63 @@ int cmd_subaru_flash_bulk_transfer(int argc, char *argv[]) {
             "  - Data length <= negotiated maxNumberOfBlockLength\n"
             "  - --addr matching the 0x34 negotiation\n"
             "\n"
-            "Usage:\n"
+            "Usage (standard mode using in-tree builder per docs/26):\n"
             "  subuwutuner-cli subaru-flash-bulk-transfer \\\n"
             "      --transport obdx --device COM4 \\\n"
             "      --addr 0x008000 \\\n"
             "      (--data <hex>  |  --zeros <N>)\n"
-            "      [--verbose]\n",
+            "      [--verbose]\n"
+            "\n"
+            "Usage (raw mode — round-23 format experiment):\n"
+            "  subuwutuner-cli subaru-flash-bulk-transfer \\\n"
+            "      --transport obdx --device COM4 \\\n"
+            "      --raw-payload <hex>\n"
+            "  Sends literally 'B6 + <hex bytes>' on the wire. Lets the user\n"
+            "  iterate format hypotheses without the in-tree builder's\n"
+            "  assumptions. Logs request + response in full.\n",
             stderr);
         return 2;
     }
 
-    // Parse hex
-    if (data_hex.size() % 2 != 0) {
+    auto const hex_nibble = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+        if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+        return -1;
+    };
+
+    // Strip whitespace from raw payload before parsing
+    if (using_raw) {
+        std::string cleaned;
+        cleaned.reserve(raw_payload_hex.size());
+        for (char c : raw_payload_hex) {
+            if (c != ' ' && c != '\t' && c != '\n' && c != '\r')
+                cleaned.push_back(c);
+        }
+        raw_payload_hex = std::move(cleaned);
+        if (raw_payload_hex.size() % 2 != 0) {
+            std::fputs("subaru-flash-bulk-transfer: --raw-payload must be "
+                       "even-length hex\n", stderr);
+            return 2;
+        }
+    }
+
+    // Parse hex (standard --data path or --raw-payload)
+    std::string const &src_hex = using_raw ? raw_payload_hex : data_hex;
+    if (!using_raw && (src_hex.size() % 2 != 0)) {
         std::fputs("subaru-flash-bulk-transfer: --data must be even-length hex\n",
                    stderr);
         return 2;
     }
     std::vector<std::uint8_t> data;
-    data.reserve(data_hex.size() / 2);
-    for (std::size_t i = 0; i < data_hex.size(); i += 2) {
-        auto const hex_nibble = [](char c) -> int {
-            if (c >= '0' && c <= '9') return c - '0';
-            if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
-            if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
-            return -1;
-        };
-        int const hi = hex_nibble(data_hex[i]);
-        int const lo = hex_nibble(data_hex[i + 1]);
+    data.reserve(src_hex.size() / 2);
+    for (std::size_t i = 0; i < src_hex.size(); i += 2) {
+        int const hi = hex_nibble(src_hex[i]);
+        int const lo = hex_nibble(src_hex[i + 1]);
         if (hi < 0 || lo < 0) {
             std::fprintf(stderr,
-                         "subaru-flash-bulk-transfer: non-hex char in --data: "
-                         "%c%c\n", data_hex[i], data_hex[i + 1]);
+                         "subaru-flash-bulk-transfer: non-hex char: %c%c\n",
+                         src_hex[i], src_hex[i + 1]);
             return 2;
         }
         data.push_back(static_cast<std::uint8_t>((hi << 4) | lo));
@@ -18658,11 +18692,25 @@ int cmd_subaru_flash_bulk_transfer(int argc, char *argv[]) {
         return 1;
     }
 
-    auto const req = st::ecu::uds::build_subaru_bulk_transfer(*addr, data);
-    std::fprintf(stdout,
-                 "subaru-flash-bulk-transfer: sending B6 to 0x%06X, %zu data "
-                 "bytes (request %zu bytes total)\n",
-                 *addr, data.size(), req.size());
+    std::vector<std::uint8_t> req;
+    if (using_raw) {
+        // Raw mode: send B6 + <bytes> verbatim. Bypasses the in-tree builder
+        // so the implementer can iterate format hypotheses without rebuilding.
+        req.reserve(1 + data.size());
+        req.push_back(0xB6U);
+        req.insert(req.end(), data.begin(), data.end());
+        std::fputs("subaru-flash-bulk-transfer: raw-payload mode\n", stdout);
+        std::fputs("request:", stdout);
+        for (auto b : req)
+            std::fprintf(stdout, " %02X", b);
+        std::fputc('\n', stdout);
+    } else {
+        req = st::ecu::uds::build_subaru_bulk_transfer(*addr, data);
+        std::fprintf(stdout,
+                     "subaru-flash-bulk-transfer: sending B6 to 0x%06X, %zu "
+                     "data bytes (request %zu bytes total)\n",
+                     *addr, data.size(), req.size());
+    }
     std::fflush(stdout);
 
     auto resp = (*t)->send_recv(std::span<std::uint8_t const>{req},
