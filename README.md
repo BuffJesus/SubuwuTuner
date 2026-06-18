@@ -1,83 +1,260 @@
-# SubuwuTuner
+<p align="center">
+  <!-- Mascot: drop SubuwuTunerLogo.png at assets/logo.png (or update the src here). -->
+  <img src="assets/logo.png" alt="SubuwuTuner mascot" width="240">
+</p>
 
-> A comprehensive, free, open-source **Subaru ECU tuning suite** written from scratch in modern C++23.
+<h1 align="center">SubuwuTuner</h1>
 
-**Status:** pre-1.0, active development. Read / edit / datalog / flash pipelines run end-to-end on a hardware-free path; the bench rig is up (Phase 5 stop-point cleared 2026-06-15). Remaining v1.0 ship-gates are brick-protection HIL coverage and the patch-insertion layer — see [`docs/04-roadmap.md`](docs/04-roadmap.md) for the current cut.
+<p align="center">
+  <em>Making Subaru ECUs slightly less mysterious, one ROM at a time.</em><br>
+  <strong>Cute mascot. Serious hex dumps.</strong>
+</p>
 
-## Why this exists
+<p align="center">
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache_2.0-6F4FBF.svg"></a>
+  <img alt="Language" src="https://img.shields.io/badge/C%2B%2B-23-6F4FBF.svg">
+  <img alt="Status" src="https://img.shields.io/badge/status-pre--1.0%20%E2%80%94%20active-blue.svg">
+  <img alt="Platforms" src="https://img.shields.io/badge/platforms-Win%20%7C%20macOS%20%7C%20Linux-blue.svg">
+</p>
 
-Subaru tuning has historically meant picking between uncomfortable options: a sluggish Java GUI built around a decade-old definition format, a polished but locked-down commercial app, or hand-editing hex in IDA. Each makes different tradeoffs; none of them is *natively fast, scriptable, open, and friendly to community-curated definitions all at once.*
+---
 
-SubuwuTuner is the result of asking: **what would a tuning tool look like if it were designed today, from first principles, with the same care a modern compiler or IDE puts into responsiveness and ergonomics?** Native C++23 throughout. Sub-second startup. ~10 MB portable bundle. A CLI that does everything the GUI does, because tuning shops, dyno operators, and CI pipelines are first-class users. Definitions you can `git diff`, `git blame`, and pull-request. Engine-safety rules baked in by default; emissions policy left to the user's jurisdiction.
+## What Is SubuwuTuner?
 
-It targets 2015–2021 (VA) and 2022+ (VB) WRX manual transmission at v1.0 because that's what the bench rig can credibly brick-test. v1.x expands to STI, AT variants, older EJ-powered cars, BRZ/86, and the rest of the Subaru lineup as definition packs land and flash routines clear bench testing.
+SubuwuTuner is an open-source research and tooling project for Subaru ECUs. The work is split across several adjacent tracks:
 
-## What you can do with it
+- **ROM definition development** — TOML schema for documenting calibration tables, axes, scaling, units, and policy flags
+- **ECU communication research** — SSM (K-line + CAN) and UDS protocol clients, SecurityAccess seed/key recovery, definition-driven map reads
+- **CAN protocol analysis** — replay, DBC decode, baseline modeling, change detection, `.cdb` bundle format
+- **Logging and diagnostics tooling** — multi-sink datalogger, live gauge cluster, CSV export
+- **Flashing infrastructure research** — flash orchestrator, manifest + journal, backup store, per-ISA brick-protection model, security-access variants
+- **Reverse engineering and documentation** — bench rig with junkyard ECUs, written handoffs between analyst and implementer sessions, design docs numbered `docs/00` through `docs/42`
 
-**Edit a calibration.** Open a `.stune` project. The sidebar is a hierarchical 9-group view of every map the definition pack knows about — fuel, ignition, boost, throttle, AVCS, transmission, idle, etc. Click a table; it opens in a 2D/3D editor with axis labels, scaling, units, glossary hovers, and policy badges (S = safety-critical, E = emissions-flagged). Click a cell, type a value, hit Enter. The history panel records the edit with timestamps and tags; Ctrl+Z walks it back. Ctrl+S persists everything to `edits.toml` inside the `.stune` directory — a TOML file you can diff, commit, and code-review.
+The project is C++23 throughout, Apache 2.0 licensed, headless-first (every GUI capability is reachable from the `subuwutuner-cli`), and cross-platform from day one.
 
-**Datalog a session.** Plug in a supported adapter, pick PIDs, hit record. Logs land as CSV via `st::log::CsvSink` for grep-friendly downstream tooling. Sustained high-rate logging across 20+ PIDs is the baseline target. The live gauge-cluster panel paints ImPlot mini-lines while you're recording; CSV-replay panels work the same way after the fact.
+A name like SubuwuTuner is a deliberate choice. The codebase is not.
 
-**Auto-tune from your logs.** Feed the MAF kernel a CSV from a real drive; it proposes scaling adjustments cell-by-cell with engine-safety linting on by default (won't recommend a fuel cell into the danger zone, won't propose ignition advance past a known-knock-prone region). The knock-pull kernel watches feedback knock retard and proposes ignition pulls where the ECU keeps pulling timing. Both surface as previewable, undoable `edit::History` operations — nothing touches your project until you accept it.
+---
 
-**Design a custom feature.** The `.stmod` node-graph designer lets you sketch a feature like "when clutch is engaged AND throttle > 80% AND RPM > 4500, override the boost target table." Drag nodes, wire them up, hit compile. The IR backend emits **SH-2A or RH850 patch bytes** — actual machine code, with FPU bridging on SH-2A and mask-merge select on RH850, 22 primitives at parity across both architectures. Sample graphs ship in `fixtures/samples/`.
+## Features
 
-**Reflash with brick protection.** The flash orchestrator is a multi-stage pipeline: pre-write backup (mandatory, CRC-gated, refuses to proceed without a verified backup), per-ISA delta detection, per-sector erase/write/verify, dry-run, manifest, journal-based power-loss resume, audit log. The recovery model is per-ISA — SH-2A uses serial-boot recovery, RH850 uses dual-bank atomic-swap. If power drops mid-flash, the journal lets the next attempt pick up exactly where the last one left off. (The orchestrator runs end-to-end against `MockTransport` today; live-ECU validation is the remaining v1.0 ship gate.)
+Listed honestly. Working means *runs end-to-end today*. Experimental means *the code path is real but real-world coverage is thin*. Research in progress means *active investigation*. Planned means *not started or sketched only*.
 
-**Script the whole thing.** Everything in the GUI has a `subuwutuner-cli` equivalent. 70+ subcommands. JSON emitters on the structured ones (`pack-info --json`, `workflow-list --json`, `knock-snapshot --json`) for piping into other tools or CI gates.
+### Working
 
-**Reverse-engineer CAN traffic.** Five `can-*` subcommands for replay-path RE: ingest an `.asc` log, score against a `BaselineModel`, surface change-detector signals, draft a DBC. Bundles into `.cdb` for sharing.
+- **ROM viewer + diff** — raw binary load, CRC32 / sector hashing, structured per-cell diff, JSON envelope for CI scripting (`rom-info`, `dump-table`, `dump-axis`, `rom-diff`, `diff`)
+- **Definition pack loader** — TOML schema with `extends` inheritance, validation, hygiene linting (`pack-info`, `pack-lint`)
+- **Definition generation pipeline** — `tools/defgen/` (Python) lifts factual data from public XML schemas into the TOML pack format
+- **`.stune` project model** — directory-backed, diffable, `working.bin` + `source.bin` + `edits.toml` with audit history (`project-new`, `project-info`, `project-validate`, `project-clone`)
+- **Table editor with full undo/redo** — selection, paste, smooth, interpolate, percent-scale, bulk CSV import/export; every operation goes through `edit::History`
+- **Jurisdiction profile system** — first-run profile (`motorsport-only`, `alberta-ca`, `eu-roadworthy`, `california-us`) drives edit-time warnings on emissions-flagged tables
+- **DTC bitmap toggles** — `[[dtc_bitmap]]` schema in packs; toggles route through the history layer so they undo cleanly
+- **Auto-tune kernels** — MAF scaling kernel and knock-pull ignition kernel, both with engine-safety linting on by default; previewable as `edit::History` proposals before commit
+- **Custom-features designer** — visual node-graph editor (`.stmod` files), graph linter, IR lowering, SH-2A *and* RH850 backends at 22-primitive parity
+- **CAN reverse-engineering toolkit** — replay, DBC parse/emit/decode, `BaselineModel` + `ChangeDetector`, `.cdb` bundle (`can-replay`, `can-diff`, `can-discover`, `can-decode`, `can-export-dbc`)
+- **Datalogger pipeline** — `LiveBuffer` SPSC ring, `LogSession` multi-sink fan-out, `CsvSink` for downstream tooling
+- **Transport stack** — `ITransport` abstraction with J2534 v04.04, OBDX Pro VX (DVI codec), native handheld (custom framed codec), and `MockTransport` for tests
+- **ECU protocol clients** — SSM (K-line + ISO-TP CAN), UDS (DSC, SA, RDBI/WDBI, RMBA/WMBA, RequestDownload, TransferData, RequestTransferExit, SubaruBulkTransfer)
+- **SecurityAccess recovery** — Subaru SSMCAN1 family: factory 16-round Feistel + aftermarket L1 + L3 variants, CLI-selectable via `--sa-variant`
+- **Audit log** — CRC32-protected append-only log, wired across UDS + Flasher; tamper-evident, NDJSON export
+- **CLI** — 70+ subcommands covering every domain capability; structured emitters offer `--json` for scripting
+- **Cross-platform build** — Win MSVC, MinGW-w64, Apple Clang (Intel + Apple Silicon), Linux GCC, Linux Clang (ASan + UBSan)
 
-## Highlights
+### Experimental
 
-- **Native and fast** — sub-second startup, ~150 MB idle RAM, **~10 MB portable / ~8 MB installer** (Windows).
-- **Headless-first** — same domain core drives the GUI and `subuwutuner-cli`; **70+ CLI subcommands** with JSON emitters on the structured ones.
-- **Git-friendly definitions** — TOML schema, diffable, pull-requestable; `extends` chains let third-party packs override one field at a time. `pack-info` + `pack-lint` keep regressions out of CI.
-- **Open auto-tune** — MAF + knock-pull kernels shipped first-party with engine-safety linting on by default. See [`docs/12-auto-tuning.md`](docs/12-auto-tuning.md).
-- **Custom features** — node-graph designer (`.stmod` files) that compiles to SH-2A *or* RH850 patch bytes at 22-primitive parity. See [`docs/16-custom-features.md`](docs/16-custom-features.md).
-- **Real brick protection** — per-ISA recovery model (SH-2A serial-boot, RH850 atomic-swap), mandatory pre-write full-ROM backup with CRC verify gate, delta-only writes, journal-based power-loss resume. `st::policy::FlashPreflight` runs `EcuIdMatch` / `VinMatch` / `BatteryVoltageOk` / `IgnitionState` / `ChecksumKnown` / `BackupStorePresent` before any byte goes on the wire. See [`docs/31-brick-protection-by-isa.md`](docs/31-brick-protection-by-isa.md) and [`docs/40-delta-flash-brick-protection.md`](docs/40-delta-flash-brick-protection.md).
-- **Tuning-knowledge atlas** — consolidated machine-readable tuning facts wired into the table editor, with a sortable tune-library panel for your local catalog. See [`docs/39-tuning-knowledge-atlas.md`](docs/39-tuning-knowledge-atlas.md).
-- **Workflow modals + transactional history** — pack-declared `[[workflow]]` registry drives guided multi-table operations (e.g. FA20 → FA24 swap). Each batch records under a single transaction tag so the entire workflow undoes in one action from the status-bar badge.
-- **CAN reverse-engineering toolkit** — replay, DBC decode, baseline / change-detector, `.cdb` bundle. Five `subuwutuner-cli can-*` subcommands. See [`docs/14-can-reverse-engineering.md`](docs/14-can-reverse-engineering.md).
-- **Jurisdiction-aware, not paternalistic** — first-run profile picker decides whether emissions-flagged edits warn, confirm, or stay silent. Engine-safety warnings stay strict regardless. See [`docs/06-legal-ethics.md`](docs/06-legal-ethics.md).
-- **Tamper-evident audit** — `st::audit` is a CRC32-protected append-only log wired across UDS + Flasher; every reflash leaves a record. Pin/star sidecar in the GUI, NDJSON export with pinned-only scope.
-- **Cross-platform on day one** — Windows, macOS (Intel + Apple Silicon), Linux (x64 + arm64). The asymmetry is in flashing transports; everything else is identical. See [Platform feature matrix](#platform-feature-matrix) below.
+- **Live datalogger over OBDX** — sustained streaming is wired and bench-tested; the high-rate (50 Hz × 20 PIDs) sustained target needs more real-vehicle coverage
+- **Flash orchestrator** — `FlashPlan` + manifest + journal + backup-store + `FlashPreflight` policy gate run end-to-end against `MockTransport`; live-ECU validation is the active bench-rig work
+- **Tune library + tuning-knowledge reference** — local sortable catalog with delta-detection heuristics; the per-cell delta sign convention has a known issue queued for fix
 
-## Philosophy
+### Research In Progress
 
-A few things that are decided, not negotiable:
+- **Phase D flash-protocol close-out** — bench-rig RE of the Subaru bulk-transfer state machine. As of round 30, `0x34` → `0xB6` → `F6` writes flash bytes successfully; the close-out sequence (`0x37` → `0xB7`) is dispatched but the state-byte=1 setter is still untraced
+- **Per-ISA brick-protection HIL coverage** — host-side recovery model documented for SH-2A (single-bank serial-boot) and RH850 (dual-bank atomic-swap); bench-rig HIL coverage is the remaining ship gate
+- **Patch insertion layer** (`src/feature_patch/`) — finds free RAM, writes hook tables, splices into existing vector tables; needs real ECU vector tables to develop against
 
-- **The user is in charge of their own car.** If you ask to edit something the tool considers risky, it warns once and lets you proceed. It does not lock you out. The only hard refusals are on engine-safety grounds (delete a knock sensor's threshold table and you get a refusal — that's a fast path to a broken engine regardless of jurisdiction).
-- **No cloud, no telemetry, no always-online dependency.** SubuwuTuner does not phone home. Your tunes live on your disk. Auto-update fetches signed manifests when you ask it to, not on a schedule (see [`docs/22-auto-update.md`](docs/22-auto-update.md)).
-- **Destructive operations get engineering-grade safety.** Reflash is the operation that can brick an ECU. It gets the most engineering. Pre-write backups are mandatory and CRC-verified. The flash orchestrator refuses to run without a verified backup. Mutation tests on `st::flash` are a release gate.
-- **Clean-room throughout.** SubuwuTuner is original work, not a port. Protocol facts come from public standards (ISO 14229 UDS, ISO 15765 CAN-TP, SAE J2534, J1979 OBD-II) and from observing Subaru's own behavior on the wire. Expression-level borrowing from any other tuning tool, open or commercial, is a non-starter. See [`docs/15-clean-room-engineering.md`](docs/15-clean-room-engineering.md) for the methodology — including how the AI assistants in the loop respect the same boundary.
+### Planned
 
-## What's NOT in scope
+- Checksum-repair algorithm implementations (the `IChecksumRepair` seam is in place; concrete `subaru_std` / `subaru_alt` / `subaru_alt2` impls wait on byte-validation against known-stock dumps)
+- Installer + signed manifest auto-update channel (`docs/22-auto-update.md`)
+- Documentation site (MkDocs or similar)
+- Closed-loop trim integration for MAF auto-tune
+- Boost-trim auto-tune kernel
+- STI variants, EJ-era cars, AT variants, BRZ / 86 expansion
+- Standalone Doc-18 master plan (PC-tethered handheld) — `docs/18-standalone-master-plan.md`
 
-- **Non-Subaru OEMs.** Different OEM = different project. SubuwuTuner is opinionated about doing one thing well.
-- **Bundled calibration definitions.** The infrastructure ships; definition packs are user-supplied. Reasoning lives in [`docs/17-data-distribution-policy.md`](docs/17-data-distribution-policy.md). The bundled `fixtures/demo-pack/` is synthetic and always-available so the tool is exercisable from a fresh clone.
-- **First-party defeat-preset calibrations.** Performance edits are the user's call. The tool will not ship "delete cat" buttons as out-of-the-box content.
-- **A SavvyCAN replacement.** The CAN toolkit is scriptable-discovery-focused, not a full visual signal-graph workstation.
-- **Hiding what the tool is doing.** No silent edits, no obscured journal, no closed flash sequence. The audit log + manifest pair shows exactly what touched your ROM and when.
+---
 
-## New here?
+## Supported Platforms
 
-- **[`docs/getting-started.md`](docs/getting-started.md)** — 5-minute path from `git clone` to your first tune edit (build → demo project → first edit). **Start here.**
-- **[`docs/install.md`](docs/install.md)** — installing definition packs into the per-platform user-data directory
-- **[`docs/00-overview.md`](docs/00-overview.md)** — design rationale; what we're building and why
-- **[`docs/README.md`](docs/README.md)** — full design-doc index (architecture, protocols, flash safety, IP boundaries, distribution policy)
-- **[`CHANGELOG.md`](CHANGELOG.md)** — running log of substantive changes
-- **[`CONTRIBUTING.md`](CONTRIBUTING.md)** — clean-room methodology, code style, PR flow
-- **[`SECURITY.md`](SECURITY.md)** — responsible-disclosure policy and scope
+### ECU families
 
-## Building
+| Family | v1.0 ship target | Bench-rig coverage | Notes |
+|---|---|---|---|
+| **FA20DIT / SH-2A (VA 2015–2021 WRX MT)** | yes | LF79002P junkyard ECU on bench | Primary v1.0 platform |
+| **FA24DIT / RH850 (VB 2022+ WRX MT)** | yes | RH850 codegen at SH-2A parity; bench coverage pending hardware | Primary v1.0 platform |
+| EJ-era WRX / STI / Forester | v1.x | — | Definition packs and flash routines after v1.0 |
+| BRZ / 86 (FA20 / FA24 NA) | v1.x | — | Pack development tracked in `docs/04-roadmap.md` |
 
-Requirements:
+### Host platforms
 
-- C++23 compiler (MSVC 19.40+ / Apple Clang 16+ / GCC 14+ / MinGW-w64 15+)
-- CMake 3.28+
-- Ninja (recommended)
-- Git
+| Capability | Windows | macOS | Linux |
+|---|:-:|:-:|:-:|
+| GUI, CLI, project work, ROM viewer / editor | ✅ | ✅ | ✅ |
+| TOML pack loader + `defgen` pipeline | ✅ | ✅ | ✅ |
+| Auto-tune kernels (MAF + knock-pull) | ✅ | ✅ | ✅ |
+| Custom-features designer (SH-2A + RH850 codegen) | ✅ | ✅ | ✅ |
+| CAN replay / DBC decode / `.cdb` discovery | ✅ | ✅ | ✅ |
+| Datalogging via OBDX Pro VX (USB-CDC) | ✅ | ✅ | ✅ |
+| Flashing via OBDX Pro VX / native handheld | ✅ | ✅ | ✅ |
+| Flashing via J2534 adapters | ✅ | Windows-only DLL | Windows-only DLL |
+| Live CAN bus capture (`can-record --live`) | ✅ | ✅ | ✅ |
+
+J2534 v04.04 is a Windows-DLL API; the OBDX / native paths are the cross-platform substitute.
+
+---
+
+## Architecture Overview
+
+```
+            ┌──────────────────────────────────────────────────────┐
+            │                       GUI (Dear ImGui)               │
+            │                       CLI (subuwutuner-cli, 70+)     │
+            └────────────────────────┬─────────────────────────────┘
+                                     │
+            ┌────────────────────────▼─────────────────────────────┐
+            │                Domain core (C++23, no UI)            │
+            │                                                      │
+            │  rom · defs · edit · project · profile · policy      │
+            │  autotune · feature · feature_codegen · diff         │
+            │  log · audit · library · config                      │
+            └────────────────────────┬─────────────────────────────┘
+                                     │
+            ┌────────────────────────▼─────────────────────────────┐
+            │              Hardware-touching layers                │
+            │                                                      │
+            │   transport   ecu (ssm + uds + dit + sa)             │
+            │   can / dbc / discover                               │
+            │   flash (orchestrator + manifest + journal)          │
+            └──────────────────────────────────────────────────────┘
+```
+
+### ROM definitions
+
+TOML pack format (`docs/11-definition-format.md`). Each table declares address, dimensions, axis layout, scaling, units, glossary text, and policy flags (`safety`, `emissions`). Packs inherit via `extends`; child packs override one field at a time without forking. `pack-lint` enforces hygiene in CI. `defgen` (Python, frozen as a per-platform PyInstaller binary in the release artifacts) lifts factual data from public ECU XML schemas into the TOML format.
+
+### ECU communication
+
+`st::transport::ITransport` is the wire abstraction. Concrete implementations: J2534 (Windows DLL ABI), OBDX Pro VX (DVI codec over USB-CDC), native handheld (custom framed codec), `MockTransport` (tests). Protocol clients on top: `st::ecu::ssm` (K-line and CAN framing), `st::ecu::uds` (standard ISO 14229 services + Subaru bulk-transfer `0xB6`), `st::ecu::subaru_dit` (DIT flash client). SecurityAccess is a `SecurityKeyFn` strategy: factory Feistel and aftermarket L1 / L3 variants live in `src/ecu/src/subaru_security.cpp`.
+
+### Logging
+
+`LiveBuffer` is an SPSC ring; `LogSession` fans out to N sinks. `CsvSink` is the bundled implementation. The GUI's live gauge cluster reads from the same buffer as the file sink, so you can record-while-gauging without extra glue.
+
+### Flashing
+
+`st::flash::Flasher::execute(plan, cancel)` walks a `FlashPlan` sector by sector. Pre-write: full-ROM backup via `BackupStore` (CRC-gated; the orchestrator refuses to run without a verified backup), `FlashPreflight` policy checks (`EcuIdMatch`, `VinMatch`, `BatteryVoltageOk`, `IgnitionState`, `ChecksumKnown`, `BackupStorePresent`), per-sector erase/write/verify with retry budgets. The manifest + journal pair makes power-loss resume idempotent. Recovery is per-ISA (SH-2A serial-boot path, RH850 atomic-swap path); the model is in `docs/31-brick-protection-by-isa.md`.
+
+### Data extraction
+
+Definition-driven map reads come through the `Definition` + `Rom` pairing: cell coordinates resolve via axes, scaling applies on read, units render in the editor. The `.stune` project format pins both the source ROM and the working ROM; every edit goes through `edit::History` and serializes to `edits.toml` (a TOML file you can diff, blame, and code-review).
+
+### Definition generation
+
+`tools/defgen/` walks a public ECU XML schema, extracts addresses + scalings + axis breakpoints (facts, not prose), and emits TOML packs that map to the SubuwuTuner schema. Per-platform mapping YAMLs handle the schema-evolution rules. The pipeline is fact-only by policy; OEM-authored description prose is not lifted.
+
+---
+
+## Repository Layout
+
+```
+code/
+├── src/                       Domain core + tooling, organized by module
+│   ├── core/                  Result, Error, units, span types
+│   ├── rom/                   Raw ROM I/O, CRC32, sector hashes
+│   ├── defs/                  TOML pack loader + Definition model
+│   ├── edit/                  Edit ops + History (undo/redo)
+│   ├── project/               .stune directory model
+│   ├── policy/                FlashPreflight + jurisdiction gate
+│   ├── profile/               Jurisdiction profiles
+│   ├── transport/             ITransport + J2534 / OBDX / native / Mock
+│   ├── ecu/                   SSM, UDS, DIT flash, SecurityAccess
+│   ├── audit/                 Append-only audit log
+│   ├── log/                   Datalogger pipeline + CSV sink
+│   ├── can/                   CAN frame I/O, .asc handling
+│   ├── dbc/                   DBC parser / emitter / decoder
+│   ├── discover/              CAN signal discovery + .cdb bundle
+│   ├── flash/                 Flasher + FlashPlan + manifest + journal
+│   ├── autotune/              MAF + knock-pull kernels
+│   ├── feature/               Custom-features Graph + IR
+│   ├── feature_codegen/       SH-2A + RH850 backends
+│   ├── feature_patch/         Patch insertion layer (in progress)
+│   ├── diff/                  Structured ROM diff
+│   ├── library/               Local tune library
+│   ├── ai/                    Drift classifier + LLM explanations
+│   ├── ui/                    Dear ImGui GUI (subuwutuner-gui)
+│   └── cli/                   subuwutuner-cli
+├── tools/
+│   └── defgen/                Python definition-pack generator
+├── docs/                      Design docs (00–42), getting-started, install
+├── tests/unit/                Catch2 tests, by module
+└── fixtures/
+    ├── demo-pack/             Synthetic always-available example pack
+    ├── demo.stune/            Demo project (exercisable from a fresh clone)
+    └── samples/               Sample `.stmod` graphs and trace files
+```
+
+A more detailed read on any module lives in `src/<module>/include/` headers and the corresponding `tests/unit/<module>/`.
+
+---
+
+## Current Development Focus
+
+Active work, summer 2026:
+
+- **Phase D flash-protocol close-out** on the junkyard LF79002P bench rig. Rounds 14–30 of a structured analyst ↔ implementer loop have walked from cold ECU through DSC `0x10 0x02` unblock (Phase C), through bulk-transfer writes (Phase D), to the current question of how the state machine transitions to allow `0xB7` close-out. Handoff archive lives at `D:/Subuwu/findings/handoffs/`.
+- **Per-ISA brick-protection HIL** on the same rig. SH-2A serial-boot recovery is documented in `docs/31`; RH850 atomic-swap design has open items the bench will settle.
+- **Patch insertion layer** (`src/feature_patch/`) — design pinned in `docs/30-patch-insertion.md`. The custom-features designer already emits valid SH-2A and RH850 patch bytes; the insertion layer is what splices them into real ECU vector tables.
+- **Live datalogger polish** — `LiveBuffer` and `LogSession` are wired; the next milestone is sustained-rate validation in a real car.
+
+---
+
+## Roadmap
+
+Realistic. Not a hype list.
+
+- **Definition pack coverage** — VA + VB WRX MT first (the bench-testable scope); STI, AT variants, EJ-era cars, BRZ / 86 as they clear pack development and flash routine validation
+- **Definition generation improvements** — schema-evolution heuristics, multi-source merge, automated provenance reporting
+- **Bench testing validation** — Tier 4 HIL coverage per `docs/08-testing-strategy.md`, deliberate-brick recipes per `docs/31`, 100-cycle success target before any car flash
+- **CAN protocol research** — fault tolerance under noisy buses, multi-module discovery for engine swaps, automated DBC promotion from `.cdb` traces
+- **Logging enhancements** — Aim-style standalone-record mode, multi-sink replay tooling, sustained 100 Hz × 20-PID target
+- **Flashing infrastructure** — checksum-repair algorithm landings, delta-flash brick-protection per `docs/40`, journal-resume hardening
+- **Custom-features tooling** — table-lookup primitives, broader hook coverage, end-to-end flash of community-published feature packs
+- **Automated tooling** — fuzz coverage for the TOML pack loader, mutation tests on `st::flash` as a release gate, frozen `defgen` binary in CI artifacts
+- **Documentation** — MkDocs site, design-doc cross-linking, glossary expansion, contributor onboarding flow
+
+Full per-phase status in `docs/04-roadmap.md`.
+
+---
+
+## Contributing
+
+Contributions are very welcome. The project benefits from a lot of different shapes of help:
+
+- **Reverse-engineering findings** — write up what you learn about a Subaru ECU. The structured analyst ↔ implementer handoff format in `D:/Subuwu/findings/handoffs/` is one way; design docs in `docs/` are another
+- **Definition packs** — TOML packs for additional CIDs. `pack-lint` will tell you what's missing
+- **Testing** — Catch2 unit tests live next to the code in `tests/unit/<module>/`. Bench-rig HIL recipes welcome
+- **Documentation** — the design docs are numbered 00–42 with intentional gaps; adding a new doc and cross-linking it is a productive contribution on its own
+- **Code** — C++23, `Result<T>` over exceptions in domain code, `snake_case` functions / `PascalCase` types, clang-format LLVM-base / 4 spaces / 100 cols / pointer-binds-right, clang-tidy + `-Wall -Wextra -Wpedantic -Werror` clean
+
+See `CONTRIBUTING.md` for the clean-room methodology, code style enforcement, and PR flow. New contributors should opt into the pre-commit hook:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+The hook runs `clang-format --dry-run --Werror` on staged C/C++ files.
+
+### Building
 
 ```bash
 cmake --preset linux-gcc      # or win-mingw, win-msvc, mac-clang
@@ -86,54 +263,33 @@ ctest --preset linux-gcc
 ./build/linux-gcc/bin/subuwutuner-cli --version
 ```
 
-See [`CMakePresets.json`](CMakePresets.json) for the full preset list. No vcpkg or system packages — every dependency pulls via `FetchContent` on first configure (Catch2, `tl::expected` fallback, tomlplusplus, GLFW, Dear ImGui, ImPlot, nativefiledialog-extended). First configure takes a couple of minutes; subsequent builds are incremental.
+Requirements: C++23 compiler (MSVC 19.40+ / Apple Clang 16+ / GCC 14+ / MinGW-w64 15+), CMake 3.28+, Ninja, Git. No vcpkg, no system packages — every dependency pulls via `FetchContent` on first configure. First configure takes a couple of minutes; subsequent builds are incremental.
 
-The CI matrix runs **~1700 C++ tests + 36 Python tests** across Win MSVC, macOS Apple Clang, Linux GCC, and Linux Clang ASan+UBSan, plus the `defgen` freeze matrix (PyInstaller single-file binary per OS).
+The CI matrix runs **~1700 C++ tests + 36 Python tests** across Win MSVC, macOS Apple Clang, Linux GCC, and Linux Clang ASan+UBSan, plus the `defgen` PyInstaller freeze matrix.
 
-Optional build flags (off by default) live in [`docs/07-build-and-tooling.md`](docs/07-build-and-tooling.md).
+---
 
-### Contributors
+## Disclaimer
 
-Opt into the clang-format pre-commit hook so your changes match CI before pushing:
+SubuwuTuner is experimental software targeting hardware that can cost more than a used car to replace. If you flash an ECU, upset your tuner, light up every warning lamp on the dashboard, or accidentally turn a perfectly good engine controller into a very expensive paperweight, that's on you.
 
-```bash
-git config core.hooksPath .githooks
-```
+Breaking things responsibly since commit #1.
 
-The hook runs `clang-format --dry-run --Werror` over staged C/C++ files and refuses commits that would change. Bypass once with `git commit --no-verify` for WIP commits you intend to fix up. Setup, override, and install-clang-format instructions live in [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`docs/07-build-and-tooling.md`](docs/07-build-and-tooling.md) §Pre-commit hook.
+More formally:
 
-## Definition packs
+- **No warranty.** Apache 2.0 — see `LICENSE`. Use at your own risk.
+- **Bench testing strongly encouraged.** A junkyard ECU on a 12 V PSU is cheap. A new ECU is not.
+- **Research and educational purposes.** Calibration edits, flash routines, and protocol findings are research artifacts. Validating any of them on a vehicle is the user's call and the user's responsibility.
+- **Engine-safety rules are advisory, not magic.** The tool refuses a small set of demonstrably-dangerous edits (delete a knock-sensor threshold table and you get a refusal). Everything else is your decision.
+- **Jurisdiction policy is yours.** The profile system warns where it can; it does not enforce. `docs/06-legal-ethics.md` is the long-form reasoning.
+- **Connecting any of this to a real car** — read `DISCLAIMER.md` first.
 
-SubuwuTuner ships the *infrastructure* — loader, table editor, project model, flash orchestrator, auto-tune kernels, custom-features designer, CAN toolkit, GUI — without bundled calibration definitions. Drop a TOML pack into the per-platform user-data directory (see [`docs/install.md`](docs/install.md)), or generate one from a public ECU definition XML with [`tools/defgen/`](tools/defgen/). The repo includes [`fixtures/demo-pack/`](fixtures/demo-pack/) as a synthetic always-available example so the tool is exercisable from a fresh checkout — no real definition pack required to see how the GUI feels.
-
-A definition pack is a TOML file (or directory of them) declaring every table the ECU exposes: address, dimensions, axis layout, scaling, units, glossary text, policy flags, optional `[[workflow]]` registry entries. Inheritance via `extends` lets a child pack add or override one field at a time without forking. `pack-info` + `pack-lint` make pack hygiene a one-liner in CI.
-
-The reasoning behind this distribution choice lives in [`docs/17-data-distribution-policy.md`](docs/17-data-distribution-policy.md).
-
-## Platform feature matrix
-
-The GUI, CLI, project model, auto-tune, custom-features designer, tune library, and the CAN replay / decode pipeline are platform-symmetric. The asymmetry is in **adapter / flashing transports**, because J2534 v04.04 is a Windows-DLL API.
-
-| Capability | Windows | macOS | Linux |
-|---|---|---|---|
-| GUI, CLI, project work, ROM viewer / editor | ✅ | ✅ | ✅ |
-| TOML pack loader + `defgen` pipeline | ✅ | ✅ | ✅ |
-| Auto-tune kernels (MAF + knock-pull) | ✅ | ✅ | ✅ |
-| Custom-features designer (SH-2A + RH850 codegen) | ✅ | ✅ | ✅ |
-| Tune library + tuning-knowledge atlas | ✅ | ✅ | ✅ |
-| CAN replay / DBC decode / `.cdb` discovery | ✅ | ✅ | ✅ |
-| Datalogging via OBDX Pro VX (USB-CDC) | ✅ | ✅ | ✅ |
-| Datalogging via native handheld (USB-CDC) | ✅ | ✅ | ✅ |
-| Flashing via OBDX Pro VX / native handheld | ✅ | ✅ | ✅ |
-| Flashing via **J2534** (Tactrix OpenPort 2.0, Tactrix Pro J) | ✅ | ❌ Windows-only DLL | ❌ Windows-only DLL |
-| Live CAN bus capture (`can-record --live`) | ✅ | ✅ | ✅ |
-
-On macOS and Linux, **flashing requires an OBDX Pro VX or the SubuwuTuner native handheld** (per [`docs/13-transport.md`](docs/13-transport.md)). J2534 support on those platforms is not on the roadmap — the realistic substitute is the OBDX-VX / native path, which is what SubuwuTuner has put its transport-layer engineering behind. If you only own a Tactrix OpenPort 2.0, you flash from Windows.
-
-## Safety
-
-ECU tuning can damage engines and brick ECUs. **Read [`DISCLAIMER.md`](DISCLAIMER.md) before connecting this software to a real vehicle.**
+---
 
 ## License
 
-[Apache 2.0](LICENSE). See [`docs/06-legal-ethics.md`](docs/06-legal-ethics.md) for the project's stance on emissions, IP, and distribution, [`docs/15-clean-room-engineering.md`](docs/15-clean-room-engineering.md) for the clean-room methodology, and [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) for bundled-library notices.
+[Apache 2.0](LICENSE). Third-party library notices in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). Clean-room methodology in [`docs/15-clean-room-engineering.md`](docs/15-clean-room-engineering.md). Distribution posture for definition packs in [`docs/17-data-distribution-policy.md`](docs/17-data-distribution-policy.md).
+
+<p align="center">
+  <sub><em>Bench test first. Full send later.</em></sub>
+</p>
