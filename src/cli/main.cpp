@@ -18430,6 +18430,157 @@ int cmd_subaru_flash_request_download(int argc, char *argv[]) {
     return 1;
 }
 
+// cmd_subaru_uds_send_raw — generic raw UDS sender. Round-29 §3 + §2:
+// lets the implementer probe arbitrary SIDs without per-SID verbs.
+// Sends user-supplied hex on the wire; reports raw response.
+//
+// Caller is responsible for ECU state (Phase C / Phase D / post-F6).
+int cmd_subaru_uds_send_raw(int argc, char *argv[]) {
+    std::optional<std::string> transport_kind;
+    std::string dll_path;
+    std::string device_path;
+    std::string payload_hex;
+    bool verbose = false;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr,
+                             "subaru-uds-send-raw: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--transport") {
+            if (auto const *v = require_arg("--transport"); v)
+                transport_kind = std::string{v};
+            else
+                return 2;
+        } else if (a == "--device") {
+            if (auto const *v = require_arg("--device"); v)
+                device_path = v;
+            else
+                return 2;
+        } else if (a == "--dll") {
+            if (auto const *v = require_arg("--dll"); v)
+                dll_path = v;
+            else
+                return 2;
+        } else if (a == "--verbose") {
+            verbose = true;
+        } else if (payload_hex.empty()) {
+            payload_hex = argv[i];
+        } else {
+            std::fprintf(stderr,
+                         "subaru-uds-send-raw: unexpected argument: %s\n",
+                         argv[i]);
+            return 2;
+        }
+    }
+
+    if (!transport_kind.has_value() || payload_hex.empty()) {
+        std::fputs(
+            "subaru-uds-send-raw — generic UDS request sender.\n"
+            "\n"
+            "Usage:\n"
+            "  subuwutuner-cli subaru-uds-send-raw \\\n"
+            "      --transport obdx --device COM4 \\\n"
+            "      <hex>\n"
+            "\n"
+            "Sends <hex> verbatim on the wire and prints the response.\n"
+            "Caller manages session/state. Useful for probing arbitrary\n"
+            "SIDs (e.g. 'BC', 'BD 5A A5') without dedicated verbs.\n",
+            stderr);
+        return 2;
+    }
+
+    // Strip whitespace
+    std::string cleaned;
+    cleaned.reserve(payload_hex.size());
+    for (char c : payload_hex) {
+        if (c != ' ' && c != '\t' && c != '\n' && c != '\r')
+            cleaned.push_back(c);
+    }
+    if (cleaned.empty() || cleaned.size() % 2 != 0) {
+        std::fputs("subaru-uds-send-raw: payload must be non-empty even-length "
+                   "hex\n", stderr);
+        return 2;
+    }
+    auto const hex_nibble = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+        if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+        return -1;
+    };
+    std::vector<std::uint8_t> req;
+    req.reserve(cleaned.size() / 2);
+    for (std::size_t i = 0; i < cleaned.size(); i += 2) {
+        int const hi = hex_nibble(cleaned[i]);
+        int const lo = hex_nibble(cleaned[i + 1]);
+        if (hi < 0 || lo < 0) {
+            std::fprintf(stderr, "subaru-uds-send-raw: non-hex char: %c%c\n",
+                         cleaned[i], cleaned[i + 1]);
+            return 2;
+        }
+        req.push_back(static_cast<std::uint8_t>((hi << 4) | lo));
+    }
+
+    auto const kind = st::transport::parse_kind(*transport_kind);
+    if (!kind.has_value()) {
+        std::fprintf(stderr,
+                     "subaru-uds-send-raw: --transport '%s' not recognized\n",
+                     transport_kind->c_str());
+        return 2;
+    }
+    st::transport::TransportSpec const spec{*kind, dll_path, device_path};
+    auto t = st::transport::open_transport(spec);
+    if (!t.has_value()) {
+        std::fprintf(stderr, "subaru-uds-send-raw: %s\n",
+                     t.error().to_string().c_str());
+        return 1;
+    }
+    if (verbose)
+        st::transport::obdx::set_trace_enabled(true);
+    st::transport::LinkConfig const link{st::transport::LinkKind::CanIso15765,
+                                         500000, 0x000007E0, 0x000007E8};
+    if (auto s = (*t)->open(link); !s.has_value()) {
+        std::fprintf(stderr, "subaru-uds-send-raw: transport open failed: %s\n",
+                     s.error().to_string().c_str());
+        return 1;
+    }
+
+    std::fputs("subaru-uds-send-raw: sending", stdout);
+    for (auto b : req)
+        std::fprintf(stdout, " %02X", b);
+    std::fputc('\n', stdout);
+    std::fflush(stdout);
+    auto resp = (*t)->send_recv(std::span<std::uint8_t const>{req},
+                                std::chrono::milliseconds{3000});
+    if (!resp.has_value()) {
+        std::fprintf(stdout, "response: %s\n",
+                     resp.error().to_string().c_str());
+        return 1;
+    }
+    auto const &body = resp->data;
+    std::fputs("response:", stdout);
+    for (auto b : body)
+        std::fprintf(stdout, " %02X", b);
+    std::fputc('\n', stdout);
+    if (body.size() >= 3 && body[0] == 0x7FU) {
+        std::fprintf(stdout, "  → NRC 0x%02X for SID 0x%02X\n",
+                     body[2], body[1]);
+        return 1;
+    }
+    if (!body.empty() && !req.empty() &&
+        body[0] == static_cast<std::uint8_t>(req[0] + 0x40U)) {
+        std::fprintf(stdout, "  → POSITIVE 0x%02X (handler accepted)\n",
+                     body[0]);
+        return 0;
+    }
+    return 0;
+}
+
 // cmd_subaru_flash_exit — UDS 0x37 (RequestTransferExit) wrapper.
 // Round-22 §2 deliverable. Always safe to call; on success returns
 // 0x77, otherwise NRC and the ECU's download state will time out
@@ -25207,6 +25358,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "subaru-uds-rmba") {
         return cmd_subaru_uds_rmba(argc - 2, argv + 2);
+    }
+    if (cmd == "subaru-uds-send-raw") {
+        return cmd_subaru_uds_send_raw(argc - 2, argv + 2);
     }
     if (cmd == "config") {
         return cmd_config(argc - 2, argv + 2);
