@@ -16460,7 +16460,7 @@ int cmd_subaru_ram_snapshot(int argc, char *argv[]) {
             0xFFF9DD61U,  // gate 2/3 — signal in [0x80, 0xB4]
             0xFFF8D3DCU,  // gate 4 — counter < 4
             0xFFF99835U,  // gate 5 — fault counter <= 0x05
-            0xFFF9B853U,  // gate 6 — session-state byte (== 0x02 or 0x03)
+            0xFFF9B853U,  // gate 6 — session-state byte (== 0x02 or 0x42 per round-48 decompile of FUN_000018C4)
             0xFFF9B854U,  // gate 7 — Extended→Programming transition (== 0x01)
         };
         std::vector<std::uint32_t> addrs;
@@ -16518,18 +16518,34 @@ int cmd_subaru_ram_snapshot(int argc, char *argv[]) {
                           v[3], ok ? "yes" : "NO");
             g[3] = {ok, buf};
         }
-        // Gate 6 — 0xFFF9B853 == 0x02 OR == 0x03 (current session state)
+        // Gate 6 — 0xFFF9B853 has two distinct semantic checks on this cell
+        // (analyst round-51 §4.2):
+        //   (a) DSC 0x10 0x02 precondition (round-15 spec): valid prior session
+        //       in {0x02, 0x03}. DSC handler allows transition from either
+        //       Programming or Extended.
+        //   (b) Phase D / UDS 0x34 precondition (round-48 decompile of
+        //       FUN_000018C4): valid in {0x02, 0x42}. 0x02 = Programming;
+        //       0x42 = Programming + SA L3 (both grant Phase D).
+        // The snapshot's pass/fail uses the DSC check (a) since this snapshot
+        // is named for the DSC precondition. Phase D status is also shown so
+        // the snapshot stays diagnostic across both pre-10-02 and pre-Phase-D
+        // contexts.
         {
-            bool const ok = v[4] == 0x02U || v[4] == 0x03U;
+            bool const dsc_ok    = v[4] == 0x02U || v[4] == 0x03U;
+            bool const phaseD_ok = v[4] == 0x02U || v[4] == 0x42U;
             char const *session_name =
                 v[4] == 0x01U ? "Default" :
                 v[4] == 0x02U ? "Programming" :
-                v[4] == 0x03U ? "Extended" : "unknown";
-            char buf[128];
+                v[4] == 0x03U ? "Extended" :
+                v[4] == 0x42U ? "Programming + SA L3" :
+                v[4] == 0x43U ? "Extended + SA L3" : "unknown";
+            char buf[200];
             std::snprintf(buf, sizeof(buf),
-                          "0xFFF9B853 = 0x%02X (%s)  (== 0x02 or 0x03: %s)",
-                          v[4], session_name, ok ? "yes" : "NO");
-            g[4] = {ok, buf};
+                          "0xFFF9B853 = 0x%02X (%s)  (DSC10/02 pre: %s; Phase D pre: %s)",
+                          v[4], session_name,
+                          dsc_ok ? "yes" : "NO",
+                          phaseD_ok ? "yes" : "NO");
+            g[4] = {dsc_ok, buf};
         }
         // Gate 7 — 0xFFF9B854 == 0x01 (only checked on Extended→Programming transition)
         {
@@ -16929,6 +16945,17 @@ int cmd_subaru_dsc_unblock_sequence(int argc, char *argv[]) {
     bool test_flash_download = false;
     bool force = false;
     bool verbose = false;
+    bool no_programming_entry = false;
+    bool ram_dry_run = false;
+    std::string write_cycle_path;
+    std::optional<std::uint32_t> write_cycle_addr;
+    std::chrono::milliseconds write_cycle_erase_timeout{30000};
+    std::vector<std::uint8_t> commit_wire_override;
+    std::optional<std::uint32_t> verify_addr;
+    std::vector<std::uint32_t> verify_addrs;  // multi-addr extension
+    std::vector<std::uint32_t> read_flash_addrs;
+    std::vector<std::vector<std::uint8_t>> pre_programming_3d_wires;
+    std::chrono::milliseconds inter_wire_delay{0};
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -16991,6 +17018,231 @@ int cmd_subaru_dsc_unblock_sequence(int argc, char *argv[]) {
                 return 2;
             }
             heartbeat_duration =
+                std::chrono::milliseconds{static_cast<std::int64_t>(val)};
+        } else if (a == "--no-programming-entry") {
+            // Round-46 §3.4: skip the DSC 0x10 0x02 step at end so caller
+            // ends in Extended Diag + SA L1 (which is what Mode 0x3D writes
+            // to 0xFFF82xxx need per round-46 §6). Useful for the bench
+            // recovery flow that needs to clear *0xFFF82009 BEFORE entering
+            // Programming session.
+            no_programming_entry = true;
+        } else if (a == "--ram-dry-run") {
+            // Round-52 §3 — chain Phase D negotiate + 0xB6 TransferData + 0x37
+            // RequestTransferExit against the RAM-mode sentinel 0xFFF84000.
+            // Must run in same transport as Programming entry; standalone CLI
+            // invocations drop session via S3 timer.
+            ram_dry_run = true;
+        } else if (a == "--write-cycle") {
+            // Round-53 §3 — chain Phase D + Erase + B6×N + 37 + 31 01 02 02 01
+            // commit inline after Phase C grant. Same-transport requirement:
+            // standalone subaru-flash-write-cycle drops Programming session
+            // between the two CLI invocations on this firmware (bench
+            // confirmed 2026-06-19). --write-cycle <path> takes the sector
+            // data file (must equal sector size). --write-cycle-start-addr
+            // <hex> takes the sector boundary.
+            auto const *v = require_arg("--write-cycle");
+            if (v == nullptr)
+                return 2;
+            write_cycle_path = v;
+        } else if (a == "--write-cycle-start-addr") {
+            auto const *v = require_arg("--write-cycle-start-addr");
+            if (v == nullptr)
+                return 2;
+            try {
+                write_cycle_addr = static_cast<std::uint32_t>(
+                    std::stoul(v, nullptr, 0));
+            } catch (std::exception const &) {
+                std::fprintf(stderr,
+                             "subaru-dsc-unblock-sequence: "
+                             "--write-cycle-start-addr '%s' not a valid "
+                             "hex (try 0x010000)\n", v);
+                return 2;
+            }
+        } else if (a == "--write-cycle-erase-timeout-ms") {
+            auto const *v = require_arg("--write-cycle-erase-timeout-ms");
+            if (v == nullptr)
+                return 2;
+            char *end = nullptr;
+            auto const val = std::strtoull(v, &end, 10);
+            if (end == v || *end != '\0' || val < 1000ULL || val > 60000ULL) {
+                std::fputs("subaru-dsc-unblock-sequence: "
+                           "--write-cycle-erase-timeout-ms must be 1000..60000\n",
+                           stderr);
+                return 2;
+            }
+            write_cycle_erase_timeout =
+                std::chrono::milliseconds{static_cast<std::int64_t>(val)};
+        } else if (a == "--commit-wire") {
+            // Round-55 §4.3 — override the default `31 01 02 02 01` commit
+            // wire to probe variants. One per power-cycle on this firmware.
+            auto const *v = require_arg("--commit-wire");
+            if (v == nullptr)
+                return 2;
+            std::string cleaned;
+            for (char c : std::string_view{v})
+                if (c != ' ' && c != '\t')
+                    cleaned.push_back(c);
+            if (cleaned.empty() || cleaned.size() % 2 != 0) {
+                std::fputs("subaru-dsc-unblock-sequence: --commit-wire "
+                           "needs even-length hex\n", stderr);
+                return 2;
+            }
+            auto const hex_nibble = [](char c) -> int {
+                if (c >= '0' && c <= '9') return c - '0';
+                if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+                if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+                return -1;
+            };
+            commit_wire_override.clear();
+            commit_wire_override.reserve(cleaned.size() / 2);
+            for (std::size_t k = 0; k < cleaned.size(); k += 2) {
+                int const hi = hex_nibble(cleaned[k]);
+                int const lo = hex_nibble(cleaned[k + 1]);
+                if (hi < 0 || lo < 0) {
+                    std::fputs("subaru-dsc-unblock-sequence: --commit-wire "
+                               "non-hex char\n", stderr);
+                    return 2;
+                }
+                commit_wire_override.push_back(
+                    static_cast<std::uint8_t>((hi << 4) | lo));
+            }
+        } else if (a == "--read-flash") {
+            // Round-56 implementer — non-destructive flash sampler. After
+            // Phase C entry, re-Phase-D + B7 for each comma-separated
+            // address (must be 256-byte aligned). Reads 256 raw bytes per
+            // address (current SBOX-zero session). No erase/write/commit.
+            // Used to locate drifted sectors when the analyst's damage table
+            // is incomplete and commit NRC-22's on sum check.
+            auto const *v = require_arg("--read-flash");
+            if (v == nullptr)
+                return 2;
+            std::string s{v};
+            std::size_t pos = 0;
+            while (pos < s.size()) {
+                auto const comma = s.find(',', pos);
+                std::string tok = s.substr(pos,
+                    comma == std::string::npos ? std::string::npos
+                                                : comma - pos);
+                if (!tok.empty()) {
+                    try {
+                        auto const val = static_cast<std::uint32_t>(
+                            std::stoul(tok, nullptr, 0));
+                        read_flash_addrs.push_back(val);
+                    } catch (std::exception const &) {
+                        std::fprintf(stderr,
+                                     "subaru-dsc-unblock-sequence: "
+                                     "--read-flash bad addr '%s'\n",
+                                     tok.c_str());
+                        return 2;
+                    }
+                }
+                if (comma == std::string::npos) break;
+                pos = comma + 1;
+            }
+        } else if (a == "--verify-addr") {
+            // Round-55 §4.1 — in-flow re-Phase-D + B7 verify at a different
+            // 256-byte aligned address. Reads back 256 raw bytes via B7 in
+            // current SBOX-zero session (round-39 identity-boundary). For
+            // the round-53 pattern verify, pass --verify-addr 0x01FF00 to
+            // read back the `12 34 56 78` × 64 trailer.
+            auto const *v = require_arg("--verify-addr");
+            if (v == nullptr)
+                return 2;
+            try {
+                verify_addr = static_cast<std::uint32_t>(
+                    std::stoul(v, nullptr, 0));
+            } catch (std::exception const &) {
+                std::fprintf(stderr,
+                             "subaru-dsc-unblock-sequence: "
+                             "--verify-addr '%s' not a valid hex\n", v);
+                return 2;
+            }
+        } else if (a == "--verify-addrs") {
+            // Round-56 implementer — multi-address sampler. Comma-separated
+            // 256-byte aligned addresses. Re-Phase-D + B7 for each post-37
+            // (where B7 dispatches correctly). Used to locate drifted
+            // sectors when commit NRC-22's and damage table is incomplete.
+            auto const *v = require_arg("--verify-addrs");
+            if (v == nullptr)
+                return 2;
+            std::string s{v};
+            std::size_t pos = 0;
+            while (pos < s.size()) {
+                auto const comma = s.find(',', pos);
+                std::string tok = s.substr(pos,
+                    comma == std::string::npos ? std::string::npos
+                                                : comma - pos);
+                if (!tok.empty()) {
+                    try {
+                        verify_addrs.push_back(
+                            static_cast<std::uint32_t>(
+                                std::stoul(tok, nullptr, 0)));
+                    } catch (std::exception const &) {
+                        std::fprintf(stderr,
+                                     "subaru-dsc-unblock-sequence: "
+                                     "--verify-addrs bad '%s'\n",
+                                     tok.c_str());
+                        return 2;
+                    }
+                }
+                if (comma == std::string::npos) break;
+                pos = comma + 1;
+            }
+        } else if (a == "--inject-3d-write") {
+            // Round-46 §3.4 injection: after burst-write, before DSC 0x10
+            // 0x02 entry (if not --no-programming-entry), send arbitrary
+            // 0x3D wires. Used to write *0xFFF82009 = 0x01 to clear the
+            // application's Phase-D fault gate. Hex value is the full
+            // UDS request payload e.g. "3D 14 FF F8 20 09 01 01".
+            auto const *v = require_arg("--inject-3d-write");
+            if (v == nullptr)
+                return 2;
+            std::string cleaned_hex;
+            for (char c : std::string_view{v}) {
+                if (c != ' ' && c != '\t')
+                    cleaned_hex.push_back(c);
+            }
+            if (cleaned_hex.empty() || cleaned_hex.size() % 2 != 0) {
+                std::fputs("subaru-dsc-unblock-sequence: --inject-3d-write "
+                           "needs even-length hex\n", stderr);
+                return 2;
+            }
+            auto const hex_nibble = [](char c) -> int {
+                if (c >= '0' && c <= '9') return c - '0';
+                if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+                if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+                return -1;
+            };
+            std::vector<std::uint8_t> wire;
+            wire.reserve(cleaned_hex.size() / 2);
+            for (std::size_t k = 0; k < cleaned_hex.size(); k += 2) {
+                int const hi = hex_nibble(cleaned_hex[k]);
+                int const lo = hex_nibble(cleaned_hex[k + 1]);
+                if (hi < 0 || lo < 0) {
+                    std::fputs("subaru-dsc-unblock-sequence: --inject-3d-write "
+                               "non-hex char\n", stderr);
+                    return 2;
+                }
+                wire.push_back(
+                    static_cast<std::uint8_t>((hi << 4) | lo));
+            }
+            pre_programming_3d_wires.push_back(std::move(wire));
+        } else if (a == "--inject-delay-ms") {
+            // Round-46 §3.4: inter-wire delay. Round-47 finding: writing
+            // *0xFFF82009 = 0x01 triggers internal state work in FUN_00003CD0
+            // that blocks the UDS dispatcher for ~3s. Subsequent wires
+            // silent-timeout unless we wait.
+            auto const *v = require_arg("--inject-delay-ms");
+            if (v == nullptr)
+                return 2;
+            char *end = nullptr;
+            auto const val = std::strtoull(v, &end, 10);
+            if (end == v || *end != '\0' || val > 10000ULL) {
+                std::fputs("subaru-dsc-unblock-sequence: --inject-delay-ms "
+                           "must be 0..10000\n", stderr);
+                return 2;
+            }
+            inter_wire_delay =
                 std::chrono::milliseconds{static_cast<std::int64_t>(val)};
         } else if (a == "--verbose") {
             verbose = true;
@@ -17200,6 +17452,66 @@ int cmd_subaru_dsc_unblock_sequence(int argc, char *argv[]) {
                    stdout);
     }
 
+    // Round-56 implementer — if --read-flash is set, run the sampler
+    // standalone (no DSC session setup needed; the flash-protocol-only
+    // dispatcher in the latched state routes 0x34/0xB7 directly). Useful
+    // when commit NRC-22's and we need to locate drifted sectors without
+    // touching session state.
+    if (!read_flash_addrs.empty()) {
+        std::fputs("\n[8/N] Read-flash sampler standalone "
+                   "(latch-state Phase D + B7 per addr):\n", stdout);
+        std::fflush(stdout);
+        for (auto const a : read_flash_addrs) {
+            std::array<std::uint8_t, 9> const phd{
+                0x34U, 0x04U, 0x33U,
+                static_cast<std::uint8_t>((a >> 16) & 0xFFU),
+                static_cast<std::uint8_t>((a >> 8) & 0xFFU),
+                static_cast<std::uint8_t>(a & 0xFFU),
+                0x00U, 0x01U, 0x00U};
+            auto rn = (*t)->send_recv(
+                std::span<std::uint8_t const>{phd},
+                std::chrono::milliseconds{3000});
+            if (!rn.has_value() || rn->data.size() < 4 ||
+                rn->data[0] != 0x74U) {
+                std::fprintf(stdout,
+                    "      0x%06X: Phase D REJECTED\n", a);
+                continue;
+            }
+            std::array<std::uint8_t, 4> const b7{
+                0xB7U,
+                static_cast<std::uint8_t>((a >> 16) & 0xFFU),
+                static_cast<std::uint8_t>((a >> 8) & 0xFFU),
+                static_cast<std::uint8_t>(a & 0xFFU)};
+            auto rb = (*t)->send_recv(
+                std::span<std::uint8_t const>{b7},
+                std::chrono::milliseconds{10000});
+            if (!rb.has_value() || rb->data.empty() ||
+                rb->data[0] != 0xF7U) {
+                std::fprintf(stdout,
+                    "      0x%06X: B7 REJECTED [", a);
+                if (rb.has_value())
+                    for (auto b : rb->data)
+                        std::fprintf(stdout, " %02X", b);
+                std::fputs(" ]\n", stdout);
+                continue;
+            }
+            std::uint16_t sum = 0;
+            std::size_t const n =
+                std::min<std::size_t>(256U, rb->data.size() - 1);
+            for (std::size_t i = 0; i + 1 < n; i += 2)
+                sum = static_cast<std::uint16_t>(
+                    sum + ((rb->data[1 + i] << 8) | rb->data[2 + i]));
+            std::fprintf(stdout,
+                "      0x%06X: first256_sum 0x%04X | first16:",
+                a, sum);
+            std::size_t const dn = std::min<std::size_t>(16U, n);
+            for (std::size_t i = 0; i < dn; ++i)
+                std::fprintf(stdout, " %02X", rb->data[1 + i]);
+            std::fputc('\n', stdout);
+        }
+        return 0;
+    }
+
     // Step 1 — Extended
     std::fputs("\n[1/5] DSC 0x10 0x03 (Extended)...\n", stdout);
     if (auto s = uds.diagnostic_session_control(0x03, std::chrono::milliseconds{2000});
@@ -17311,20 +17623,27 @@ int cmd_subaru_dsc_unblock_sequence(int argc, char *argv[]) {
     bool const g23 = p[1] >= 0x80U && p[1] <= 0xB4U;
     bool const g4 = p[2] < 4U;
     bool const g5 = p[3] <= 0x05U;
-    bool const g6 = p[4] == 0x02U || p[4] == 0x03U;
+    // Gate 5 — 0xFFF9B853: two-semantic check (analyst round-51 §4.2).
+    // DSC 0x10 0x02 precondition accepts {0x02, 0x03} (round-15); Phase D
+    // precondition accepts {0x02, 0x42} (round-48 FUN_000018C4). Pass/fail
+    // uses the DSC check since this snapshot is named for the DSC handler.
+    bool const g6     = p[4] == 0x02U || p[4] == 0x03U;
+    bool const g6_pd  = p[4] == 0x02U || p[4] == 0x42U;
     bool const g7 = p[5] == 0x01U;
     std::fprintf(stdout,
                  "      [%s] gate 1  0xFFF99A7E = 0x%02X  (bit 7 %s)\n"
                  "      [%s] gate 2  0xFFF9DD61 = 0x%02X  (in [0x80,0xB4]: %s)\n"
                  "      [%s] gate 3  0xFFF8D3DC = 0x%02X  (< 4: %s)\n"
                  "      [%s] gate 4  0xFFF99835 = 0x%02X  (<= 0x05: %s)\n"
-                 "      [%s] gate 5  0xFFF9B853 = 0x%02X  (== 0x02/0x03: %s)\n"
+                 "      [%s] gate 5  0xFFF9B853 = 0x%02X  (DSC10/02 pre: %s; Phase D pre: %s)\n"
                  "      [%s] gate 6  0xFFF9B854 = 0x%02X  (== 0x01: %s)\n",
                  g1  ? "OK" : "XX", p[0], g1  ? "set"  : "CLEAR",
                  g23 ? "OK" : "XX", p[1], g23 ? "yes"  : "NO",
                  g4  ? "OK" : "XX", p[2], g4  ? "yes"  : "NO",
                  g5  ? "OK" : "XX", p[3], g5  ? "yes"  : "NO",
-                 g6  ? "OK" : "XX", p[4], g6  ? "yes"  : "NO",
+                 g6  ? "OK" : "XX", p[4],
+                 g6     ? "yes" : "NO",
+                 g6_pd  ? "yes" : "NO",
                  g7  ? "OK" : "XX", p[5], g7  ? "yes"  : "NO");
 
     // Step 4 — fault-bits snapshot (round-16 cells)
@@ -17742,6 +18061,116 @@ int cmd_subaru_dsc_unblock_sequence(int argc, char *argv[]) {
                          (static_cast<std::uint16_t>(cv[3]) << 8) | cv[4]));
     }
 
+    // Round-46 §3.4: optional 0x3D writes BEFORE entering Programming session.
+    // At this point we're in Extended Diag + SA L1 with the burst-write
+    // having cleared the F2/F3/F4 fault flags. Mode 0x3D handler accepts
+    // writes to 0xFFF8xxxx in this state (per round-18); in Programming
+    // session it NRC 0x33s because the SA-level cell *0xBEDB4 doesn't track
+    // L1 there. So sneak the writes in here.
+    if (!pre_programming_3d_wires.empty()) {
+        std::fprintf(stdout,
+                     "\n[4c]  --inject-3d-write injection (%zu wires, %lld ms delay)...\n",
+                     pre_programming_3d_wires.size(),
+                     inter_wire_delay.count());
+        for (std::size_t k = 0; k < pre_programming_3d_wires.size(); ++k) {
+            if (k > 0 && inter_wire_delay.count() > 0) {
+                std::this_thread::sleep_for(inter_wire_delay);
+            }
+            auto const &wire = pre_programming_3d_wires[k];
+            std::fprintf(stdout, "      [%zu/%zu] ",
+                         k + 1, pre_programming_3d_wires.size());
+            for (auto b : wire)
+                std::fprintf(stdout, "%02X ", b);
+            std::fputs("... ", stdout);
+            std::fflush(stdout);
+            auto inj_resp = (*t)->send_recv(std::span<std::uint8_t const>{wire},
+                                            std::chrono::milliseconds{5000});
+            if (!inj_resp.has_value()) {
+                std::fprintf(stdout, "transport: %s\n",
+                             inj_resp.error().to_string().c_str());
+                continue;
+            }
+            auto const &ib = inj_resp->data;
+            std::uint8_t const req_sid = wire.empty() ? 0x00U : wire[0];
+            std::uint8_t const expected_pos = static_cast<std::uint8_t>(
+                req_sid + 0x40U);
+            if (!ib.empty() && ib[0] == expected_pos) {
+                std::fputs("OK [", stdout);
+                for (auto b : ib)
+                    std::fprintf(stdout, " %02X", b);
+                std::fputs(" ]\n", stdout);
+            } else if (ib.size() >= 3 && ib[0] == 0x7FU && ib[1] == req_sid) {
+                std::fprintf(stdout, "NRC 0x%02X\n", ib[2]);
+            } else if (!ib.empty()) {
+                std::fputs("unexpected [", stdout);
+                for (auto b : ib)
+                    std::fprintf(stdout, " %02X", b);
+                std::fputs(" ]\n", stdout);
+            } else {
+                std::fputs("empty response\n", stdout);
+            }
+        }
+    }
+
+    if (no_programming_entry) {
+        // Round-50 §3.1: when --sa-l3 is also set, attempt SA L3 inside
+        // Extended Diag (same transport, same session) to test the
+        // analyst's case A prediction (SA handler decompile: no session
+        // check on seed/key paths; gate is *0xFFF9AE86 == 2, which is
+        // already satisfied by 10 03 since SA L1 grants here). Phase D
+        // is predicted to still reject because GATE A would be 0x43
+        // (Extended + L3 flag), but the L3 grant itself is decisive
+        // for the round-50 case fork.
+        if (sa_l3) {
+            std::fputs("\n[5a/5] SA L3 attempt in Extended Diag "
+                       "(round-50 §3.1)...\n", stdout);
+            std::fflush(stdout);
+            auto seed_l3 = uds.security_access_request_seed(
+                0x03U, std::chrono::milliseconds{1500});
+            if (!seed_l3.has_value()) {
+                std::fprintf(stdout,
+                             "      27 03 requestSeed FAILED: %s\n"
+                             "      => round-50 case B/C/D — SA L3 NOT "
+                             "available in Extended.\n",
+                             seed_l3.error().to_string().c_str());
+            } else {
+                std::fprintf(stdout,
+                             "      27 03 requestSeed OK: %zu-byte seed "
+                             "=> round-50 case A confirmed at seed stage.\n",
+                             seed_l3->size());
+                auto key_l3 =
+                    st::ecu::subaru::ssmcan1_l3_aftermarket(*seed_l3);
+                if (!key_l3.has_value()) {
+                    std::fprintf(stdout,
+                                 "      key derivation FAILED: %s\n",
+                                 key_l3.error().to_string().c_str());
+                } else if (auto s = uds.security_access_send_key(
+                               0x04U, *key_l3,
+                               std::chrono::milliseconds{1500});
+                           !s.has_value()) {
+                    std::fprintf(stdout,
+                                 "      27 04 sendKey FAILED: %s\n"
+                                 "      => round-50 case A2 — try the "
+                                 "factory L3 key generator next round.\n",
+                                 s.error().to_string().c_str());
+                } else {
+                    std::fputs(
+                        "      27 04 sendKey OK (67 04). **SA L3 GRANTED "
+                        "IN EXTENDED — round-50 case A1 confirmed.**\n"
+                        "      SA handler decompile correct: *0xFFF9AE86 "
+                        "is the only gate; no session check on SA path.\n",
+                        stdout);
+                }
+            }
+        }
+        std::fputs(
+            "\n[5/5] DSC 0x10 0x02 SKIPPED (--no-programming-entry).\n"
+            "      Session left in Extended Diag + SA L1 [+ L3 if granted]. "
+            "ECU's S3 timer applies (~5s).\n",
+            stdout);
+        return 0;
+    }
+
     // Step 5 — DSC 0x10 0x02
     std::fputs("\n[5/5] DSC 0x10 0x02 (Programming)...\n", stdout);
     auto const final_dsc = uds.diagnostic_session_control(
@@ -17797,9 +18226,15 @@ int cmd_subaru_dsc_unblock_sequence(int argc, char *argv[]) {
         if (test_flash_download) {
             std::fputs("\n[7/N] UDS 0x34 RequestDownload — wire-mode determination\n",
                        stdout);
+            // Round-22/51 bench evidence: Phase D grants 74 20 01 04 with
+            // SA L1 only post-DSC 10 02. Round-48 decompile of FUN_000018C4
+            // accepts gate A in {0x02, 0x42} — 0x02 (Programming alone) is
+            // sufficient. The pre-round-51 "expecting NRC 0x33 without SA L3"
+            // warning was based on round-21's hypothesis, which round-22
+            // refuted on the bench.
             if (!sa_l3_active) {
-                std::fputs("      WARNING: --sa-l3 was not run (or failed) "
-                           "earlier. Expecting NRC 0x33.\n", stdout);
+                std::fputs("      Note: --sa-l3 not run; relying on SA L1 + "
+                           "Programming (round-22/51 path).\n", stdout);
             }
             std::fflush(stdout);
 
@@ -17899,6 +18334,806 @@ int cmd_subaru_dsc_unblock_sequence(int argc, char *argv[]) {
             if (!any_accepted) {
                 std::fputs("      Neither wire mode accepted by handler.\n",
                            stdout);
+            }
+        }
+
+        // Round-52 §3 — RAM-mode dry-run chain. Target is the 0xFFF84000 RAM
+        // sentinel branch in FUN_000018C4 (boot_integrity decompile lines
+        // 1177-1183) which bypasses gates A/B + size checks. Zero flash side
+        // effects. Validates the full 0x34 → 0xB6 → 0x37 wire chain.
+        if (ram_dry_run) {
+            std::fputs("\n[8/N] Round-52 RAM-mode Phase D dry-run "
+                       "(target 0xFFF84000)...\n", stdout);
+            std::fflush(stdout);
+
+            // T0 — baseline RMBA read of 0xFFF84000 (8 bytes) via SSM-A8.
+            // Done inline because the standalone subaru-ram-snapshot CLI
+            // returns NRC 0x11 in default session — SSM-A8 needs Extended
+            // + SA L1 at minimum, and we have that here (post-Programming).
+            std::array<std::uint8_t, 8> baseline{};
+            bool baseline_ok = false;
+            {
+                std::vector<std::uint32_t> b_addrs;
+                b_addrs.reserve(8);
+                for (std::uint32_t i = 0; i < 8; ++i)
+                    b_addrs.push_back((0xFFF84000U + i) & 0x00FFFFFFU);
+                auto br = ssm.read(
+                    b_addrs, std::chrono::milliseconds{2000});
+                if (!br.has_value()) {
+                    std::fprintf(stdout,
+                        "      [T0] baseline read FAILED: %s\n"
+                        "      => 0xFFF84000 unreadable via SSM-A8 in this "
+                        "session. Proceeding without baseline.\n",
+                        br.error().to_string().c_str());
+                } else if (br->size() < 8) {
+                    std::fprintf(stdout,
+                        "      [T0] baseline read SHORT: %zu bytes\n",
+                        br->size());
+                } else {
+                    for (std::size_t i = 0; i < 8; ++i)
+                        baseline[i] = (*br)[i];
+                    baseline_ok = true;
+                    std::fprintf(stdout,
+                        "      [T0] baseline 0xFFF84000..07 ="
+                        " %02X %02X %02X %02X %02X %02X %02X %02X\n",
+                        baseline[0], baseline[1], baseline[2], baseline[3],
+                        baseline[4], baseline[5], baseline[6], baseline[7]);
+                }
+            }
+
+            // T1 — Phase D negotiate at 0xFFF84000, 16 bytes.
+            // Wire: 34 04 33 F8 40 00 00 00 10
+            std::array<std::uint8_t, 9> const t1_req{
+                0x34U, 0x04U, 0x33U,
+                0xF8U, 0x40U, 0x00U,
+                0x00U, 0x00U, 0x10U};
+            std::fputs("      [T1] negotiate 34 04 33 F8 40 00 00 00 10 "
+                       "(16 bytes @ 0xFFF84000)... ", stdout);
+            std::fflush(stdout);
+            auto t1_resp = (*t)->send_recv(
+                std::span<std::uint8_t const>{t1_req},
+                std::chrono::milliseconds{2000});
+            if (!t1_resp.has_value()) {
+                std::fprintf(stdout, "timeout: %s\n",
+                             t1_resp.error().to_string().c_str());
+                std::fputs("      => T1 case E. Stop. Confirm session via "
+                           "RMBA on 0xFFF9B853.\n", stdout);
+            } else {
+                auto const &t1b = t1_resp->data;
+                if (t1b.empty()) {
+                    std::fputs("empty\n", stdout);
+                } else if (t1b[0] == 0x74U) {
+                    std::fputs("POSITIVE 0x74 [", stdout);
+                    for (auto b : t1b)
+                        std::fprintf(stdout, " %02X", b);
+                    std::fputs(" ]\n", stdout);
+                    std::fputs("      => T1 case A. RAM mode accepted. "
+                               "Proceed to T2.\n", stdout);
+
+                    // T1 [1b] — snapshot RAM-mode flag 0xFFF9AE9D.
+                    {
+                        std::vector<std::uint32_t> const a1b{
+                            0xFFF9AE9DU & 0x00FFFFFFU};
+                        auto r1b = ssm.read(
+                            a1b, std::chrono::milliseconds{1500});
+                        if (r1b.has_value() && !r1b->empty()) {
+                            std::fprintf(stdout,
+                                "      [T1 §1b] *0xFFF9AE9D = 0x%02X  "
+                                "(expect 0x01 = RAM-mode flag set)\n",
+                                (*r1b)[0]);
+                        } else {
+                            std::fputs(
+                                "      [T1 §1b] RMBA flag read failed\n",
+                                stdout);
+                        }
+                    }
+
+                    // T2a — UDS 0xB6 SubaruBulkTransfer with 16-byte pattern.
+                    // Wire: B6 F8 40 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10
+                    std::array<std::uint8_t, 20> const t2a_req{
+                        0xB6U,
+                        0xF8U, 0x40U, 0x00U,
+                        0x01U, 0x02U, 0x03U, 0x04U,
+                        0x05U, 0x06U, 0x07U, 0x08U,
+                        0x09U, 0x0AU, 0x0BU, 0x0CU,
+                        0x0DU, 0x0EU, 0x0FU, 0x10U};
+                    std::fputs("      [T2a] B6 F8 40 00 + 16-byte pattern "
+                               "01..10... ", stdout);
+                    std::fflush(stdout);
+                    auto t2a_resp = (*t)->send_recv(
+                        std::span<std::uint8_t const>{t2a_req},
+                        std::chrono::milliseconds{3000});
+                    bool t2a_ok = false;
+                    if (!t2a_resp.has_value()) {
+                        std::fprintf(stdout, "timeout: %s\n",
+                                     t2a_resp.error().to_string().c_str());
+                    } else {
+                        auto const &t2ab = t2a_resp->data;
+                        if (t2ab.empty()) {
+                            std::fputs("empty\n", stdout);
+                        } else if (t2ab[0] == 0xF6U) {
+                            std::fputs("POSITIVE 0xF6 [", stdout);
+                            for (auto b : t2ab)
+                                std::fprintf(stdout, " %02X", b);
+                            std::fputs(" ]\n", stdout);
+                            t2a_ok = true;
+                        } else if (t2ab.size() >= 3 && t2ab[0] == 0x7FU &&
+                                   t2ab[1] == 0xB6U) {
+                            std::fprintf(stdout, "NRC 0x%02X\n", t2ab[2]);
+                        } else {
+                            std::fputs("unexpected [", stdout);
+                            for (auto b : t2ab)
+                                std::fprintf(stdout, " %02X", b);
+                            std::fputs(" ]\n", stdout);
+                        }
+                    }
+
+                    if (t2a_ok) {
+                        // T2b — UDS 0x37 RequestTransferExit close.
+                        // Try body 5A A5 first (round-28 checksum sentinel),
+                        // then bare 0x37, then 0x37 01 04 (max-block-length BE).
+                        std::array<std::vector<std::uint8_t>, 3> const t2b_attempts{{
+                            {0x37U, 0x5AU, 0xA5U},
+                            {0x37U},
+                            {0x37U, 0x01U, 0x04U},
+                        }};
+                        std::array<char const *, 3> const t2b_labels{{
+                            "5A A5", "(empty)", "01 04"}};
+                        bool t2b_ok = false;
+                        for (std::size_t i = 0; i < t2b_attempts.size(); ++i) {
+                            std::fprintf(stdout,
+                                "      [T2b] 37 %s ... ", t2b_labels[i]);
+                            std::fflush(stdout);
+                            auto t2b_resp = (*t)->send_recv(
+                                std::span<std::uint8_t const>{t2b_attempts[i]},
+                                std::chrono::milliseconds{2000});
+                            if (!t2b_resp.has_value()) {
+                                std::fprintf(stdout, "timeout: %s\n",
+                                             t2b_resp.error().to_string().c_str());
+                                break;
+                            }
+                            auto const &b = t2b_resp->data;
+                            if (b.empty()) {
+                                std::fputs("empty\n", stdout);
+                                break;
+                            }
+                            if (b[0] == 0x77U) {
+                                std::fputs("POSITIVE 0x77\n", stdout);
+                                t2b_ok = true;
+                                break;
+                            }
+                            if (b.size() >= 3 && b[0] == 0x7FU &&
+                                b[1] == 0x37U) {
+                                std::fprintf(stdout, "NRC 0x%02X\n", b[2]);
+                                continue;
+                            }
+                            std::fprintf(stdout, "unexpected 0x%02X\n", b[0]);
+                            break;
+                        }
+                        if (t2b_ok) {
+                            // T2c — verify pattern landed at 0xFFF84000.
+                            // Read 8 bytes inline (matches baseline) so the
+                            // diff against expected 01..08 is unambiguous.
+                            std::vector<std::uint32_t> v_addrs;
+                            v_addrs.reserve(8);
+                            for (std::uint32_t i = 0; i < 8; ++i)
+                                v_addrs.push_back(
+                                    (0xFFF84000U + i) & 0x00FFFFFFU);
+                            auto vr = ssm.read(
+                                v_addrs,
+                                std::chrono::milliseconds{2000});
+                            if (!vr.has_value()) {
+                                std::fprintf(stdout,
+                                    "      [T2c] verify read FAILED: %s\n",
+                                    vr.error().to_string().c_str());
+                            } else if (vr->size() < 8) {
+                                std::fprintf(stdout,
+                                    "      [T2c] verify read SHORT: %zu\n",
+                                    vr->size());
+                            } else {
+                                std::fprintf(stdout,
+                                    "      [T2c] post-write  0xFFF84000..07 ="
+                                    " %02X %02X %02X %02X %02X %02X %02X %02X\n",
+                                    (*vr)[0], (*vr)[1], (*vr)[2], (*vr)[3],
+                                    (*vr)[4], (*vr)[5], (*vr)[6], (*vr)[7]);
+                                std::array<std::uint8_t, 8> const expect{
+                                    0x01U, 0x02U, 0x03U, 0x04U,
+                                    0x05U, 0x06U, 0x07U, 0x08U};
+                                bool matches = true;
+                                for (std::size_t i = 0; i < 8; ++i)
+                                    if ((*vr)[i] != expect[i])
+                                        matches = false;
+                                if (matches) {
+                                    std::fputs(
+                                        "      => **T2c MATCH** — pattern "
+                                        "01..08 landed at 0xFFF84000. RAM "
+                                        "chain end-to-end VALIDATED.\n",
+                                        stdout);
+                                } else if (baseline_ok) {
+                                    bool unchanged = true;
+                                    for (std::size_t i = 0; i < 8; ++i)
+                                        if ((*vr)[i] != baseline[i])
+                                            unchanged = false;
+                                    if (unchanged) {
+                                        std::fputs(
+                                            "      => T2c UNCHANGED — bytes "
+                                            "match baseline. T2a positive "
+                                            "response was from a path that "
+                                            "doesn't actually persist to "
+                                            "RAM. Reading 2/3 of §2.2.\n",
+                                            stdout);
+                                    } else {
+                                        std::fputs(
+                                            "      => T2c MISMATCH — bytes "
+                                            "differ from both pattern AND "
+                                            "baseline. Unexpected.\n",
+                                            stdout);
+                                    }
+                                } else {
+                                    std::fputs(
+                                        "      => T2c bytes differ from "
+                                        "expected 01..08; no baseline to "
+                                        "compare. Inspect.\n",
+                                        stdout);
+                                }
+                            }
+                            std::fputs(
+                                "      => T2 chain complete.\n",
+                                stdout);
+                        }
+                    }
+                } else if (t1b.size() >= 3 && t1b[0] == 0x7FU &&
+                           t1b[1] == 0x34U) {
+                    char const *hint =
+                        t1b[2] == 0x12U ? "subFunctionNotSupported (case D)" :
+                        t1b[2] == 0x13U ? "incorrectMessageLength (case C)" :
+                        t1b[2] == 0x22U ? "conditionsNotCorrect (case B — "
+                                          "RAM branch may have executed but "
+                                          "NRC fall-through won TX slot; "
+                                          "round-53 FUN_001CEBE8 decompile)" :
+                                          "(unknown)";
+                    std::fprintf(stdout, "NRC 0x%02X — %s\n", t1b[2], hint);
+                } else {
+                    std::fputs("unexpected [", stdout);
+                    for (auto b : t1b)
+                        std::fprintf(stdout, " %02X", b);
+                    std::fputs(" ]\n", stdout);
+                }
+            }
+        }
+
+        // Round-56 implementer — non-destructive flash sampler. Used when
+        // commit NRC-22's and we need to identify which sector(s) are
+        // drifted from stock. Each addr: re-Phase-D (size 0x100) + B7 +
+        // print first 32 bytes + compute u16 BE sum of full 256 bytes.
+        if (!read_flash_addrs.empty()) {
+            std::fputs("\n[8/N] Read-flash sampler (--read-flash):\n",
+                       stdout);
+            std::fflush(stdout);
+            for (auto const a : read_flash_addrs) {
+                std::array<std::uint8_t, 9> const phd{
+                    0x34U, 0x04U, 0x33U,
+                    static_cast<std::uint8_t>((a >> 16) & 0xFFU),
+                    static_cast<std::uint8_t>((a >> 8) & 0xFFU),
+                    static_cast<std::uint8_t>(a & 0xFFU),
+                    0x00U, 0x01U, 0x00U};
+                auto rn = (*t)->send_recv(
+                    std::span<std::uint8_t const>{phd},
+                    std::chrono::milliseconds{3000});
+                if (!rn.has_value() || rn->data.size() < 4 ||
+                    rn->data[0] != 0x74U) {
+                    std::fprintf(stdout,
+                        "      0x%06X: Phase D REJECTED\n", a);
+                    continue;
+                }
+                std::array<std::uint8_t, 4> const b7{
+                    0xB7U,
+                    static_cast<std::uint8_t>((a >> 16) & 0xFFU),
+                    static_cast<std::uint8_t>((a >> 8) & 0xFFU),
+                    static_cast<std::uint8_t>(a & 0xFFU)};
+                auto rb = (*t)->send_recv(
+                    std::span<std::uint8_t const>{b7},
+                    std::chrono::milliseconds{10000});
+                if (!rb.has_value() || rb->data.empty() ||
+                    rb->data[0] != 0xF7U) {
+                    std::fprintf(stdout,
+                        "      0x%06X: B7 REJECTED\n", a);
+                    continue;
+                }
+                std::uint16_t sum = 0;
+                std::size_t const n =
+                    std::min<std::size_t>(256U, rb->data.size() - 1);
+                for (std::size_t i = 0; i + 1 < n; i += 2)
+                    sum = static_cast<std::uint16_t>(
+                        sum + ((rb->data[1 + i] << 8) | rb->data[2 + i]));
+                std::fprintf(stdout,
+                    "      0x%06X: sum 0x%04X | first 16:",
+                    a, sum);
+                std::size_t const dn = std::min<std::size_t>(16U, n);
+                for (std::size_t i = 0; i < dn; ++i)
+                    std::fprintf(stdout, " %02X",
+                                 rb->data[1 + i]);
+                std::fputc('\n', stdout);
+            }
+        }
+
+        // Round-53 §3 — inline write-cycle chain: Phase D + Erase + B6×N
+        // + 37 finalize + 31 01 02 02 01 commit. Runs in the same transport
+        // as Phase C entry; standalone subaru-flash-write-cycle drops
+        // Programming session between the two CLI invocations on this
+        // firmware (S3 timer).
+        if (!write_cycle_path.empty()) {
+            if (!write_cycle_addr.has_value()) {
+                std::fputs("\n[8/N] --write-cycle requires "
+                           "--write-cycle-start-addr <hex>. Skipped.\n",
+                           stdout);
+            } else {
+                std::FILE *fp = std::fopen(write_cycle_path.c_str(), "rb");
+                if (fp == nullptr) {
+                    std::fprintf(stdout,
+                        "\n[8/N] --write-cycle: cannot open '%s'.\n",
+                        write_cycle_path.c_str());
+                } else {
+                    std::fseek(fp, 0, SEEK_END);
+                    auto const sz = std::ftell(fp);
+                    std::fseek(fp, 0, SEEK_SET);
+                    std::vector<std::uint8_t> wc_data(
+                        static_cast<std::size_t>(sz));
+                    if (std::fread(wc_data.data(), 1, wc_data.size(), fp)
+                        != wc_data.size()) {
+                        std::fprintf(stdout,
+                            "\n[8/N] --write-cycle: short read of '%s'.\n",
+                            write_cycle_path.c_str());
+                        std::fclose(fp);
+                    } else {
+                        std::fclose(fp);
+                        if (wc_data.size() % 256U != 0) {
+                            std::fprintf(stdout,
+                                "\n[8/N] --write-cycle: data size %zu is "
+                                "not a multiple of 256 — must equal sector "
+                                "size (typically 64KB).\n",
+                                wc_data.size());
+                        } else {
+                            std::uint32_t const wc_addr = *write_cycle_addr;
+                            std::uint32_t const wc_size =
+                                static_cast<std::uint32_t>(wc_data.size());
+                            std::uint32_t const wc_blocks = wc_size / 256U;
+                            std::fprintf(stdout,
+                                "\n[8/N] Write-cycle chain @ 0x%06X / "
+                                "0x%X bytes (%u × 256-byte blocks)\n",
+                                wc_addr, wc_size, wc_blocks);
+                            std::fflush(stdout);
+
+                            auto wc_send = [&](char const *label,
+                                std::span<std::uint8_t const> wire,
+                                std::chrono::milliseconds to)
+                                -> std::optional<std::vector<std::uint8_t>> {
+                                auto r = (*t)->send_recv(wire, to);
+                                if (!r.has_value()) {
+                                    std::fprintf(stdout,
+                                        "      %s: transport: %s\n",
+                                        label,
+                                        r.error().to_string().c_str());
+                                    return std::nullopt;
+                                }
+                                return r->data;
+                            };
+
+                            // Step 1 — Phase D negotiate
+                            std::array<std::uint8_t, 9> const wc_phd{
+                                0x34U, 0x04U, 0x33U,
+                                static_cast<std::uint8_t>((wc_addr >> 16) & 0xFFU),
+                                static_cast<std::uint8_t>((wc_addr >> 8) & 0xFFU),
+                                static_cast<std::uint8_t>(wc_addr & 0xFFU),
+                                static_cast<std::uint8_t>((wc_size >> 16) & 0xFFU),
+                                static_cast<std::uint8_t>((wc_size >> 8) & 0xFFU),
+                                static_cast<std::uint8_t>(wc_size & 0xFFU)};
+                            std::fputs("      [1/5] Phase D 34 04 33 ... ",
+                                       stdout);
+                            std::fflush(stdout);
+                            auto r1 = wc_send("Phase D", wc_phd,
+                                std::chrono::milliseconds{3000});
+                            if (!r1.has_value() ||
+                                r1->size() < 4 || (*r1)[0] != 0x74U) {
+                                std::fputs("REJECTED [", stdout);
+                                if (r1.has_value())
+                                    for (auto b : *r1)
+                                        std::fprintf(stdout, " %02X", b);
+                                std::fputs(" ]\n", stdout);
+                                goto wc_done;
+                            }
+                            std::fputs("→ 74 20 01 04\n", stdout);
+
+                            // Step 2 — Erase
+                            {
+                                constexpr std::array<std::uint8_t, 8> erase_wire{
+                                    0x31U, 0x01U, 0x02U, 0x01U,
+                                    0x0FU, 0xFFU, 0xFFU, 0xFFU};
+                                std::fputs("      [2/5] Erase 31 01 02 01 "
+                                           "0F FF FF FF ... ", stdout);
+                                std::fflush(stdout);
+                                auto t_e = std::chrono::steady_clock::now();
+                                auto re = wc_send("Erase", erase_wire,
+                                    write_cycle_erase_timeout);
+                                auto el = std::chrono::duration_cast<
+                                    std::chrono::milliseconds>(
+                                    std::chrono::steady_clock::now() - t_e);
+                                if (!re.has_value() ||
+                                    re->size() < 4 || (*re)[0] != 0x71U) {
+                                    std::fprintf(stdout,
+                                        "REJECTED after %lld ms [", el.count());
+                                    if (re.has_value())
+                                        for (auto b : *re)
+                                            std::fprintf(stdout, " %02X", b);
+                                    std::fputs(" ]\n", stdout);
+                                    goto wc_done;
+                                }
+                                std::fprintf(stdout,
+                                    "→ 71 01 02 01 (%lld ms)\n", el.count());
+                            }
+
+                            // Step 3 — B6 × N
+                            {
+                                std::fprintf(stdout,
+                                    "      [3/5] B6 × %u blocks...\n",
+                                    wc_blocks);
+                                std::fflush(stdout);
+                                std::vector<std::uint8_t> b6w(260);
+                                b6w[0] = 0xB6U;
+                                auto t_w = std::chrono::steady_clock::now();
+                                bool wc_ok = true;
+                                for (std::uint32_t i = 0; i < wc_blocks; ++i) {
+                                    std::uint32_t const ba =
+                                        wc_addr + i * 256U;
+                                    b6w[1] = static_cast<std::uint8_t>(
+                                        (ba >> 16) & 0xFFU);
+                                    b6w[2] = static_cast<std::uint8_t>(
+                                        (ba >> 8) & 0xFFU);
+                                    b6w[3] = static_cast<std::uint8_t>(
+                                        ba & 0xFFU);
+                                    std::memcpy(b6w.data() + 4,
+                                        wc_data.data() + i * 256U, 256);
+                                    auto rb = wc_send("B6", b6w,
+                                        std::chrono::milliseconds{10000});
+                                    if (!rb.has_value() ||
+                                        rb->empty() || (*rb)[0] != 0xF6U) {
+                                        std::fprintf(stdout,
+                                            "        block %u/%u @ 0x%06X "
+                                            "REJECTED [", i + 1, wc_blocks,
+                                            ba);
+                                        if (rb.has_value())
+                                            for (auto b : *rb)
+                                                std::fprintf(stdout, " %02X", b);
+                                        std::fputs(" ]\n", stdout);
+                                        wc_ok = false;
+                                        break;
+                                    }
+                                    if (i % 16U == 15U || i + 1 == wc_blocks) {
+                                        std::fprintf(stdout,
+                                            "        %u/%u (last @ 0x%06X)\r",
+                                            i + 1, wc_blocks, ba);
+                                        std::fflush(stdout);
+                                    }
+                                }
+                                auto el = std::chrono::duration_cast<
+                                    std::chrono::milliseconds>(
+                                    std::chrono::steady_clock::now() - t_w);
+                                if (!wc_ok)
+                                    goto wc_done;
+                                std::fprintf(stdout,
+                                    "\n        All %u blocks F6 (%lld ms)\n",
+                                    wc_blocks, el.count());
+                            }
+
+                            // Step 4 — 37 finalize
+                            {
+                                constexpr std::array<std::uint8_t, 1> fwire{
+                                    0x37U};
+                                std::fputs("      [4/5] 37 (finalize) ... ",
+                                           stdout);
+                                std::fflush(stdout);
+                                auto rf = wc_send("Finalize", fwire,
+                                    std::chrono::milliseconds{3000});
+                                if (!rf.has_value() ||
+                                    rf->empty() || (*rf)[0] != 0x77U) {
+                                    std::fputs("REJECTED [", stdout);
+                                    if (rf.has_value())
+                                        for (auto b : *rf)
+                                            std::fprintf(stdout, " %02X", b);
+                                    std::fputs(" ]\n", stdout);
+                                    goto wc_done;
+                                }
+                                std::fputs("→ 77\n", stdout);
+                            }
+
+                            // Step 4.5 — B7 hash echo (round-54 §2.1 state
+                            // machine: state 2 → 0 transition gating commit).
+                            // Wire: B7 + negotiated_start_addr (3-byte BE).
+                            // Response: F7 + 256 bytes (64 × hash(u32) of the
+                            // first 256 bytes of negotiated range). Required
+                            // before commit; round-53 NRC 0x22 was this step
+                            // missing.
+                            {
+                                std::array<std::uint8_t, 4> const b7w{
+                                    0xB7U,
+                                    static_cast<std::uint8_t>(
+                                        (wc_addr >> 16) & 0xFFU),
+                                    static_cast<std::uint8_t>(
+                                        (wc_addr >> 8) & 0xFFU),
+                                    static_cast<std::uint8_t>(wc_addr & 0xFFU)};
+                                std::fputs(
+                                    "      [4.5/5] B7 + start-addr (hash echo, "
+                                    "state 2→0) ... ", stdout);
+                                std::fflush(stdout);
+                                auto r45 = wc_send("B7", b7w,
+                                    std::chrono::milliseconds{10000});
+                                if (!r45.has_value() ||
+                                    r45->empty() || (*r45)[0] != 0xF7U) {
+                                    std::fputs("REJECTED [", stdout);
+                                    if (r45.has_value())
+                                        for (auto b : *r45)
+                                            std::fprintf(stdout, " %02X", b);
+                                    std::fputs(" ]\n", stdout);
+                                    goto wc_done;
+                                }
+                                std::fprintf(stdout,
+                                    "→ F7 + %zu bytes\n",
+                                    r45->size() - 1);
+                                // Dump first 32 bytes of payload to disambiguate
+                                // raw-bytes vs hashed-u32s reading (round-54
+                                // observed FF FF FF FF for all-FF data — raw,
+                                // not hash; analyst round-32 §3.2 had hash
+                                // prediction; payload dump lets analyst
+                                // re-verify against round-31 trace).
+                                std::size_t const dump_n =
+                                    std::min<std::size_t>(32U, r45->size() - 1);
+                                std::fputs("        payload[0..", stdout);
+                                std::fprintf(stdout, "%zu]:", dump_n);
+                                for (std::size_t i = 0; i < dump_n; ++i)
+                                    std::fprintf(stdout, " %02X",
+                                                 (*r45)[1 + i]);
+                                std::fputc('\n', stdout);
+                            }
+
+                            // Round-54 §8.5 — snapshot state machine + lockout
+                            // counter candidates between B7 and commit so the
+                            // analyst can decode why commit NRC 0x22s. SSM-A8
+                            // may already be NRC 0x11'd by the flash-only-
+                            // routing latch (round-52); we try anyway since
+                            // it's free.
+                            {
+                                std::vector<std::uint32_t> snap_addrs{
+                                    0x00F9B84BU,  // state machine cell
+                                    0x00F82000U,  // lockout counter cand. 0x0
+                                    0x00F82002U,  // 0x2
+                                    0x00F82009U,  // 0x9 (round-46/48 known)
+                                    0x00F82014U,  // 0x14
+                                    0x00F82019U,  // 0x19
+                                    0x00F82034U,  // 0x34
+                                };
+                                auto rs = ssm.read(snap_addrs,
+                                    std::chrono::milliseconds{2000});
+                                if (!rs.has_value()) {
+                                    std::fprintf(stdout,
+                                        "      [4.6/5] state snapshot via "
+                                        "SSM-A8 FAILED: %s\n"
+                                        "        (latched routing — expected "
+                                        "per round-52)\n",
+                                        rs.error().to_string().c_str());
+                                } else if (rs->size() >= 7) {
+                                    std::fprintf(stdout,
+                                        "      [4.6/5] state snapshot:\n"
+                                        "        0xFFF9B84B (state) = 0x%02X "
+                                        "(expect 0 post-B7)\n"
+                                        "        0xFFF82000 = 0x%02X  "
+                                        "0xFFF82002 = 0x%02X  "
+                                        "0xFFF82009 = 0x%02X\n"
+                                        "        0xFFF82014 = 0x%02X  "
+                                        "0xFFF82019 = 0x%02X  "
+                                        "0xFFF82034 = 0x%02X\n",
+                                        (*rs)[0], (*rs)[1], (*rs)[2],
+                                        (*rs)[3], (*rs)[4], (*rs)[5],
+                                        (*rs)[6]);
+                                }
+                            }
+
+                            // Round-56 implementer — multi-addr sampler.
+                            // Post-37 the B7 dispatcher returns raw bytes
+                            // for `B7 + <current negotiated_start>`. Re-
+                            // Phase-D at each requested addr + B7 returns
+                            // 256 bytes from that addr. Reports first 16
+                            // bytes + u16 BE sum of full 256 for diff vs
+                            // stock.
+                            if (!verify_addrs.empty()) {
+                                std::fprintf(stdout,
+                                    "      [4.7/5] Multi-addr sampler "
+                                    "(%zu addrs)...\n",
+                                    verify_addrs.size());
+                                std::fflush(stdout);
+                                for (auto const va : verify_addrs) {
+                                    std::array<std::uint8_t, 9> const vphd{
+                                        0x34U, 0x04U, 0x33U,
+                                        static_cast<std::uint8_t>((va >> 16) & 0xFFU),
+                                        static_cast<std::uint8_t>((va >> 8) & 0xFFU),
+                                        static_cast<std::uint8_t>(va & 0xFFU),
+                                        0x00U, 0x01U, 0x00U};
+                                    auto rn = wc_send("re-PhaseD", vphd,
+                                        std::chrono::milliseconds{3000});
+                                    if (!rn.has_value() ||
+                                        rn->size() < 4 ||
+                                        (*rn)[0] != 0x74U) {
+                                        std::fprintf(stdout,
+                                            "        0x%06X: Phase D "
+                                            "REJECTED\n", va);
+                                        continue;
+                                    }
+                                    std::array<std::uint8_t, 4> const vb7{
+                                        0xB7U,
+                                        static_cast<std::uint8_t>((va >> 16) & 0xFFU),
+                                        static_cast<std::uint8_t>((va >> 8) & 0xFFU),
+                                        static_cast<std::uint8_t>(va & 0xFFU)};
+                                    auto rb = wc_send("B7", vb7,
+                                        std::chrono::milliseconds{10000});
+                                    if (!rb.has_value() ||
+                                        rb->empty() ||
+                                        (*rb)[0] != 0xF7U) {
+                                        std::fprintf(stdout,
+                                            "        0x%06X: B7 REJECTED\n",
+                                            va);
+                                        continue;
+                                    }
+                                    std::uint16_t sum = 0;
+                                    std::size_t const n =
+                                        std::min<std::size_t>(
+                                            256U, rb->size() - 1);
+                                    for (std::size_t i = 0; i + 1 < n;
+                                         i += 2)
+                                        sum = static_cast<std::uint16_t>(
+                                            sum +
+                                            (((*rb)[1 + i] << 8) |
+                                             (*rb)[2 + i]));
+                                    std::fprintf(stdout,
+                                        "        0x%06X: sum 0x%04X | "
+                                        "first16:", va, sum);
+                                    std::size_t const dn =
+                                        std::min<std::size_t>(16U, n);
+                                    for (std::size_t i = 0; i < dn; ++i)
+                                        std::fprintf(stdout, " %02X",
+                                                     (*rb)[1 + i]);
+                                    std::fputc('\n', stdout);
+                                }
+                            }
+
+                            // Step 5 — Commit (default 31 01 02 02 01 per
+                            // round-42 COBB log; --commit-wire to override
+                            // per round-55 §4.3 variant probes).
+                            {
+                                std::vector<std::uint8_t> cwire;
+                                if (commit_wire_override.empty()) {
+                                    cwire = {0x31U, 0x01U, 0x02U, 0x02U,
+                                             0x01U};
+                                } else {
+                                    cwire = commit_wire_override;
+                                }
+                                std::fputs("      [5/5] ", stdout);
+                                for (auto b : cwire)
+                                    std::fprintf(stdout, "%02X ", b);
+                                std::fputs("(commit) ... ", stdout);
+                                std::fflush(stdout);
+                                auto rc = wc_send("Commit", cwire,
+                                    write_cycle_erase_timeout);
+                                if (!rc.has_value() ||
+                                    rc->size() < 4 || (*rc)[0] != 0x71U) {
+                                    std::fputs("REJECTED [", stdout);
+                                    if (rc.has_value())
+                                        for (auto b : *rc)
+                                            std::fprintf(stdout, " %02X", b);
+                                    std::fputs(" ]\n", stdout);
+                                } else {
+                                    std::fputs(
+                                        "→ 71 01 02 02. "
+                                        "**COMMIT POSITIVE.**\n",
+                                        stdout);
+                                }
+                            }
+
+                            // Step 6 — Round-55 §4.1 in-flow verify. Re-
+                            // negotiate Phase D at --verify-addr and B7 to
+                            // read back 256 raw bytes (B7 returns raw in
+                            // current SBOX-zero session per round-55 §2).
+                            // Runs regardless of commit success — the verify
+                            // is the gold standard answer for "did the
+                            // pattern land".
+                            if (verify_addr.has_value()) {
+                                std::uint32_t const va = *verify_addr;
+                                std::fprintf(stdout,
+                                    "      [6/6] In-flow verify at 0x%06X "
+                                    "(re-Phase-D + B7)...\n", va);
+                                std::array<std::uint8_t, 9> const vphd{
+                                    0x34U, 0x04U, 0x33U,
+                                    static_cast<std::uint8_t>((va >> 16) & 0xFFU),
+                                    static_cast<std::uint8_t>((va >> 8) & 0xFFU),
+                                    static_cast<std::uint8_t>(va & 0xFFU),
+                                    0x00U, 0x01U, 0x00U};  // size = 0x100
+                                std::fputs(
+                                    "        re-Phase-D 34 04 33 ... ",
+                                    stdout);
+                                std::fflush(stdout);
+                                auto vrn = wc_send("Re-Phase-D", vphd,
+                                    std::chrono::milliseconds{3000});
+                                if (!vrn.has_value() ||
+                                    vrn->size() < 4 || (*vrn)[0] != 0x74U) {
+                                    std::fputs("REJECTED [", stdout);
+                                    if (vrn.has_value())
+                                        for (auto b : *vrn)
+                                            std::fprintf(stdout, " %02X", b);
+                                    std::fputs(" ]\n        verify SKIPPED\n",
+                                               stdout);
+                                } else {
+                                    std::fputs("→ 74 20 01 04\n", stdout);
+                                    std::array<std::uint8_t, 4> const vb7{
+                                        0xB7U,
+                                        static_cast<std::uint8_t>(
+                                            (va >> 16) & 0xFFU),
+                                        static_cast<std::uint8_t>(
+                                            (va >> 8) & 0xFFU),
+                                        static_cast<std::uint8_t>(va & 0xFFU)};
+                                    std::fputs("        B7 + verify-addr ... ",
+                                               stdout);
+                                    std::fflush(stdout);
+                                    auto vr = wc_send("Verify B7", vb7,
+                                        std::chrono::milliseconds{10000});
+                                    if (!vr.has_value() ||
+                                        vr->empty() || (*vr)[0] != 0xF7U) {
+                                        std::fputs("REJECTED [", stdout);
+                                        if (vr.has_value())
+                                            for (auto b : *vr)
+                                                std::fprintf(stdout, " %02X", b);
+                                        std::fputs(" ]\n", stdout);
+                                    } else {
+                                        std::size_t const vd_n =
+                                            std::min<std::size_t>(
+                                                32U, vr->size() - 1);
+                                        std::fprintf(stdout,
+                                            "→ F7 + %zu bytes\n",
+                                            vr->size() - 1);
+                                        std::fputs(
+                                            "        readback[0..32]:",
+                                            stdout);
+                                        for (std::size_t i = 0; i < vd_n; ++i)
+                                            std::fprintf(stdout, " %02X",
+                                                         (*vr)[1 + i]);
+                                        std::fputc('\n', stdout);
+                                        // Compare against expected pattern
+                                        // if the verify-addr falls inside
+                                        // the written sector and we have
+                                        // the data file in memory.
+                                        if (va >= wc_addr &&
+                                            va + 256U <= wc_addr + wc_size) {
+                                            std::size_t const off =
+                                                va - wc_addr;
+                                            bool match = true;
+                                            for (std::size_t i = 0;
+                                                 i < 256 && i < vr->size() - 1;
+                                                 ++i) {
+                                                if ((*vr)[1 + i] !=
+                                                    wc_data[off + i]) {
+                                                    match = false;
+                                                    break;
+                                                }
+                                            }
+                                            std::fprintf(stdout,
+                                                "        match vs written "
+                                                "data: %s\n",
+                                                match ? "**YES**" : "NO");
+                                        }
+                                    }
+                                }
+                            }
+                            wc_done:;
+                        }
+                    }
+                }
             }
         }
 
@@ -18440,6 +19675,9 @@ int cmd_subaru_uds_send_raw(int argc, char *argv[]) {
     std::string dll_path;
     std::string device_path;
     std::string payload_hex;
+    std::uint32_t can_id_request = 0x7E0U;
+    std::uint32_t can_id_response = 0x7E8U;
+    std::chrono::milliseconds recv_timeout{3000};
     bool verbose = false;
 
     for (int i = 0; i < argc; ++i) {
@@ -18467,6 +19705,55 @@ int cmd_subaru_uds_send_raw(int argc, char *argv[]) {
                 dll_path = v;
             else
                 return 2;
+        } else if (a == "--can-id") {
+            if (auto const *v = require_arg("--can-id"); v) {
+                try {
+                    can_id_request = static_cast<std::uint32_t>(
+                        std::stoul(v, nullptr, 0));
+                } catch (std::exception const &) {
+                    std::fprintf(stderr,
+                                 "subaru-uds-send-raw: --can-id '%s' not a "
+                                 "valid hex (try 0x7E0)\n",
+                                 v);
+                    return 2;
+                }
+            } else {
+                return 2;
+            }
+        } else if (a == "--rx-can-id") {
+            if (auto const *v = require_arg("--rx-can-id"); v) {
+                try {
+                    can_id_response = static_cast<std::uint32_t>(
+                        std::stoul(v, nullptr, 0));
+                } catch (std::exception const &) {
+                    std::fprintf(stderr,
+                                 "subaru-uds-send-raw: --rx-can-id '%s' not a "
+                                 "valid hex (try 0x7E8)\n",
+                                 v);
+                    return 2;
+                }
+            } else {
+                return 2;
+            }
+        } else if (a == "--timeout-ms") {
+            // Round-53 §5.2.1 — long ECU operations (256-byte 0xB6 blocks,
+            // 0x31 erase, etc.) need >3s for the first frame. OBDX transport
+            // then has a 30s NRC 0x78 swallow loop on top of this. Default
+            // 3s is fine for short queries; bump to 10000 or 30000 for
+            // flash-protocol wires.
+            auto const *v = require_arg("--timeout-ms");
+            if (v == nullptr)
+                return 2;
+            char *end = nullptr;
+            auto const val = std::strtoull(v, &end, 10);
+            if (end == v || *end != '\0' || val < 100ULL || val > 60000ULL) {
+                std::fputs(
+                    "subaru-uds-send-raw: --timeout-ms must be 100..60000\n",
+                    stderr);
+                return 2;
+            }
+            recv_timeout =
+                std::chrono::milliseconds{static_cast<std::int64_t>(val)};
         } else if (a == "--verbose") {
             verbose = true;
         } else if (payload_hex.empty()) {
@@ -18486,11 +19773,17 @@ int cmd_subaru_uds_send_raw(int argc, char *argv[]) {
             "Usage:\n"
             "  subuwutuner-cli subaru-uds-send-raw \\\n"
             "      --transport obdx --device COM4 \\\n"
+            "      [--timeout-ms <100..60000>] \\\n"
             "      <hex>\n"
             "\n"
             "Sends <hex> verbatim on the wire and prints the response.\n"
             "Caller manages session/state. Useful for probing arbitrary\n"
-            "SIDs (e.g. 'BC', 'BD 5A A5') without dedicated verbs.\n",
+            "SIDs (e.g. 'BC', 'BD 5A A5') without dedicated verbs.\n"
+            "\n"
+            "--timeout-ms is the verb-side wait for the FIRST response frame.\n"
+            "Default 3000. The OBDX transport adds up to 30s of NRC 0x78\n"
+            "ResponsePending swallow on top once the first frame arrives.\n"
+            "Bump to 10000+ for flash-protocol wires (0xB6 blocks, 0x31 erase).\n",
             stderr);
         return 2;
     }
@@ -18543,20 +19836,25 @@ int cmd_subaru_uds_send_raw(int argc, char *argv[]) {
     if (verbose)
         st::transport::obdx::set_trace_enabled(true);
     st::transport::LinkConfig const link{st::transport::LinkKind::CanIso15765,
-                                         500000, 0x000007E0, 0x000007E8};
+                                         500000, can_id_request,
+                                         can_id_response};
     if (auto s = (*t)->open(link); !s.has_value()) {
         std::fprintf(stderr, "subaru-uds-send-raw: transport open failed: %s\n",
                      s.error().to_string().c_str());
         return 1;
     }
 
-    std::fputs("subaru-uds-send-raw: sending", stdout);
+    std::fprintf(stdout,
+                 "subaru-uds-send-raw: tx-id=0x%X rx-id=0x%X sending",
+                 can_id_request, can_id_response);
     for (auto b : req)
         std::fprintf(stdout, " %02X", b);
     std::fputc('\n', stdout);
     std::fflush(stdout);
+    // Suppress unused-warning when defaults are used without override.
+    (void)can_id_request; (void)can_id_response;
     auto resp = (*t)->send_recv(std::span<std::uint8_t const>{req},
-                                std::chrono::milliseconds{3000});
+                                recv_timeout);
     if (!resp.has_value()) {
         std::fprintf(stdout, "response: %s\n",
                      resp.error().to_string().c_str());
@@ -18734,6 +20032,1434 @@ int cmd_subaru_flash_exit(int argc, char *argv[]) {
         return 0;
     }
     std::fprintf(stdout, "UNEXPECTED response 0x%02X\n", body[0]);
+    return 0;
+}
+
+// cmd_subaru_flash_erase — UDS 0x31 RoutineControl erase wrapper.
+// Round-39 §5.2 deliverable. Sends the COBB-confirmed erase wire
+// `31 01 02 01 0F FF FF FF` and waits up to --timeout-ms (default 30000)
+// for the eventual `71 01 02 01` positive. The OBDX transport's send_recv
+// internally swallows NRC 0x78 (responsePending) frames per ISO 14229 §7.5,
+// so a generous timeout is all that's needed beyond `subaru-uds-send-raw`'s
+// default 3000ms (which is too short for full-sector erase).
+//
+// Precondition: caller must have run `subaru-dsc-unblock-sequence` (Phase C)
+// and `subaru-uds-send-raw "34 04 33 <sector-start-3> <sector-size-3>"`
+// (Phase D, sector-aligned per round-38 §4.1) before this verb. Erase
+// targets the negotiated range.
+int cmd_subaru_flash_erase(int argc, char *argv[]) {
+    std::optional<std::string> transport_kind;
+    std::string dll_path;
+    std::string device_path;
+    int timeout_ms = 30000;
+    bool verbose = false;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "subaru-flash-erase: %s requires a value\n",
+                             name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--transport") {
+            if (auto const *v = require_arg("--transport"); v)
+                transport_kind = std::string{v};
+            else
+                return 2;
+        } else if (a == "--device") {
+            if (auto const *v = require_arg("--device"); v)
+                device_path = v;
+            else
+                return 2;
+        } else if (a == "--dll") {
+            if (auto const *v = require_arg("--dll"); v)
+                dll_path = v;
+            else
+                return 2;
+        } else if (a == "--timeout-ms") {
+            if (auto const *v = require_arg("--timeout-ms"); v) {
+                try {
+                    timeout_ms = std::stoi(v);
+                } catch (std::exception const &) {
+                    std::fprintf(stderr,
+                                 "subaru-flash-erase: --timeout-ms must be an integer\n");
+                    return 2;
+                }
+            } else {
+                return 2;
+            }
+        } else if (a == "--verbose") {
+            verbose = true;
+        } else {
+            std::fprintf(stderr, "subaru-flash-erase: unknown option: %s\n",
+                         argv[i]);
+            return 2;
+        }
+    }
+
+    if (!transport_kind.has_value()) {
+        std::fputs(
+            "subaru-flash-erase — UDS 0x31 RoutineControl erase wrapper.\n"
+            "\n"
+            "Usage:\n"
+            "  subuwutuner-cli subaru-flash-erase --transport obdx --device COM4 \\\n"
+            "      [--timeout-ms 30000] [--verbose]\n"
+            "\n"
+            "Sends the COBB-confirmed erase wire `31 01 02 01 0F FF FF FF`\n"
+            "(round-37 §1) and waits for `71 01 02 01` positive. Erases the\n"
+            "range previously negotiated via subaru-dsc-unblock-sequence +\n"
+            "Phase D 0x34 (which must use a sector-aligned length per round-38\n"
+            "§4.1 and round-39 §2 — partial-sector lengths NRC 0x22).\n"
+            "\n"
+            "FCU erase takes 200-500ms for 8KB sectors, up to several seconds\n"
+            "for 128KB. Default 30s timeout covers the worst case.\n",
+            stderr);
+        return 2;
+    }
+
+    auto const kind = st::transport::parse_kind(*transport_kind);
+    if (!kind.has_value()) {
+        std::fprintf(stderr,
+                     "subaru-flash-erase: --transport '%s' not recognized\n",
+                     transport_kind->c_str());
+        return 2;
+    }
+    st::transport::TransportSpec const spec{*kind, dll_path, device_path};
+    auto t = st::transport::open_transport(spec);
+    if (!t.has_value()) {
+        std::fprintf(stderr, "subaru-flash-erase: %s\n",
+                     t.error().to_string().c_str());
+        return 1;
+    }
+    if (verbose)
+        st::transport::obdx::set_trace_enabled(true);
+    st::transport::LinkConfig const link{st::transport::LinkKind::CanIso15765,
+                                         500000, 0x000007E0, 0x000007E8};
+    if (auto s = (*t)->open(link); !s.has_value()) {
+        std::fprintf(stderr, "subaru-flash-erase: transport open failed: %s\n",
+                     s.error().to_string().c_str());
+        return 1;
+    }
+
+    constexpr std::array<std::uint8_t, 8> erase_wire{
+        0x31U, 0x01U, 0x02U, 0x01U, 0x0FU, 0xFFU, 0xFFU, 0xFFU};
+    std::fputs("subaru-flash-erase: sending 31 01 02 01 0F FF FF FF\n", stdout);
+    std::fflush(stdout);
+    auto const t_start = std::chrono::steady_clock::now();
+    auto resp = (*t)->send_recv(std::span<std::uint8_t const>{erase_wire},
+                                std::chrono::milliseconds{timeout_ms});
+    auto const elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - t_start);
+    if (!resp.has_value()) {
+        std::fprintf(stderr, "subaru-flash-erase: %s (after %lld ms)\n",
+                     resp.error().to_string().c_str(),
+                     elapsed.count());
+        return 1;
+    }
+    auto const &body = resp->data;
+    std::fputs("response:", stdout);
+    for (auto b : body)
+        std::fprintf(stdout, " %02X", b);
+    std::fprintf(stdout, "  (elapsed %lld ms)\n", elapsed.count());
+    if (body.size() >= 4 && body[0] == 0x71U && body[1] == 0x01U &&
+        body[2] == 0x02U && body[3] == 0x01U) {
+        std::fputs("  → POSITIVE 71 01 02 01 — erase complete.\n", stdout);
+        return 0;
+    }
+    if (body.size() >= 3 && body[0] == 0x7FU && body[1] == 0x31U) {
+        std::fprintf(stdout, "  → NRC 0x%02X — erase rejected.\n", body[2]);
+        if (body[2] == 0x22U) {
+            std::fputs(
+                "    (0x22 conditionsNotCorrect — Phase D length probably not "
+                "sector-aligned;\n"
+                "     see round-39 §2 SECTOR_TABLE for valid sizes.)\n",
+                stdout);
+        }
+        return 1;
+    }
+    std::fputs("  → UNEXPECTED response.\n", stdout);
+    return 1;
+}
+
+namespace {
+
+// Tiny boilerplate helper for the diagnostic verbs (Mode 01/03/04).
+// Returns 0 on positive, 1 on NRC or transport error, 2 on bad args.
+// The verbs all share the same option set (--transport / --device / --dll /
+// --verbose) and a fixed wire — only the wire bytes + the response shape
+// differ.
+int run_simple_diagnostic_verb(
+    char const *verb_name, char const *help_text,
+    std::span<std::uint8_t const> wire, std::uint8_t expected_positive_sid,
+    int argc, char *argv[]) {
+    std::optional<std::string> transport_kind;
+    std::string dll_path;
+    std::string device_path;
+    int timeout_ms = 3000;
+    bool verbose = false;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "%s: %s requires a value\n",
+                             verb_name, name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--transport") {
+            if (auto const *v = require_arg("--transport"); v)
+                transport_kind = std::string{v};
+            else
+                return 2;
+        } else if (a == "--device") {
+            if (auto const *v = require_arg("--device"); v)
+                device_path = v;
+            else
+                return 2;
+        } else if (a == "--dll") {
+            if (auto const *v = require_arg("--dll"); v)
+                dll_path = v;
+            else
+                return 2;
+        } else if (a == "--timeout-ms") {
+            if (auto const *v = require_arg("--timeout-ms"); v) {
+                try {
+                    timeout_ms = std::stoi(v);
+                } catch (std::exception const &) {
+                    std::fprintf(stderr,
+                                 "%s: --timeout-ms must be an integer\n",
+                                 verb_name);
+                    return 2;
+                }
+            } else {
+                return 2;
+            }
+        } else if (a == "--verbose") {
+            verbose = true;
+        } else {
+            std::fprintf(stderr, "%s: unknown option: %s\n", verb_name,
+                         argv[i]);
+            return 2;
+        }
+    }
+
+    if (!transport_kind.has_value()) {
+        std::fputs(help_text, stderr);
+        return 2;
+    }
+
+    auto const kind = st::transport::parse_kind(*transport_kind);
+    if (!kind.has_value()) {
+        std::fprintf(stderr, "%s: --transport '%s' not recognized\n",
+                     verb_name, transport_kind->c_str());
+        return 2;
+    }
+    st::transport::TransportSpec const spec{*kind, dll_path, device_path};
+    auto t = st::transport::open_transport(spec);
+    if (!t.has_value()) {
+        std::fprintf(stderr, "%s: %s\n", verb_name,
+                     t.error().to_string().c_str());
+        return 1;
+    }
+    if (verbose)
+        st::transport::obdx::set_trace_enabled(true);
+    st::transport::LinkConfig const link{st::transport::LinkKind::CanIso15765,
+                                         500000, 0x000007E0, 0x000007E8};
+    if (auto s = (*t)->open(link); !s.has_value()) {
+        std::fprintf(stderr, "%s: transport open failed: %s\n", verb_name,
+                     s.error().to_string().c_str());
+        return 1;
+    }
+
+    std::fprintf(stdout, "%s: sending", verb_name);
+    for (auto b : wire)
+        std::fprintf(stdout, " %02X", b);
+    std::fputc('\n', stdout);
+    std::fflush(stdout);
+    auto resp =
+        (*t)->send_recv(wire, std::chrono::milliseconds{timeout_ms});
+    if (!resp.has_value()) {
+        std::fprintf(stderr, "%s: %s\n", verb_name,
+                     resp.error().to_string().c_str());
+        return 1;
+    }
+    auto const &body = resp->data;
+    std::fputs("response:", stdout);
+    for (auto b : body)
+        std::fprintf(stdout, " %02X", b);
+    std::fputc('\n', stdout);
+    if (!body.empty() && body[0] == expected_positive_sid) {
+        std::fprintf(stdout, "  → POSITIVE 0x%02X — ECU alive.\n", body[0]);
+        return 0;
+    }
+    if (body.size() >= 3 && body[0] == 0x7FU) {
+        std::fprintf(stdout, "  → NRC 0x%02X for SID 0x%02X\n", body[2],
+                     body[1]);
+        return 1;
+    }
+    std::fputs("  → UNEXPECTED response.\n", stdout);
+    return 1;
+}
+
+}  // namespace
+
+// cmd_subaru_mode1_probe — OBD-II Mode 01 PID 00 (supported PIDs).
+// Cheapest "is the ECU alive at all" probe. No DSC entry, no SA — works
+// in default session. Per round-42 §3.3: if this fails, ECU is genuinely
+// broken; if it succeeds, any subsequent failure is DSC/Programming-specific.
+int cmd_subaru_mode1_probe(int argc, char *argv[]) {
+    constexpr std::array<std::uint8_t, 2> wire{0x01U, 0x00U};
+    static constexpr char const help[] =
+        "subaru-mode1-probe — OBD-II Mode 01 PID 00 (supported PIDs) alive check.\n"
+        "\n"
+        "Usage:\n"
+        "  subuwutuner-cli subaru-mode1-probe --transport obdx --device COM4 \\\n"
+        "      [--timeout-ms 3000] [--verbose]\n"
+        "\n"
+        "Sends 01 00 and expects a 41 00 XX XX XX XX positive response.\n"
+        "Use as the FIRST step in any bench diagnostic flow.\n";
+    return run_simple_diagnostic_verb("subaru-mode1-probe", help, wire,
+                                       0x41U, argc, argv);
+}
+
+// cmd_subaru_read_dtcs — UDS Mode 0x03 (ReadDTCInformation legacy / OBD-II).
+// Reports any DTCs currently stored. Per round-42 §3.3 step 2: many DTCs
+// related to "programming aborted" suggest the bench is in accumulated
+// lockout state.
+int cmd_subaru_read_dtcs(int argc, char *argv[]) {
+    constexpr std::array<std::uint8_t, 1> wire{0x03U};
+    static constexpr char const help[] =
+        "subaru-read-dtcs — OBD-II Mode 03 (read stored DTCs).\n"
+        "\n"
+        "Usage:\n"
+        "  subuwutuner-cli subaru-read-dtcs --transport obdx --device COM4 \\\n"
+        "      [--timeout-ms 3000] [--verbose]\n"
+        "\n"
+        "Sends 03 and expects 43 NN <DTC bytes...> positive response.\n"
+        "Per round-42 §3.3: lots of programming-aborted DTCs suggests\n"
+        "accumulated bench lockout; clear via subaru-clear-dtcs.\n";
+    return run_simple_diagnostic_verb("subaru-read-dtcs", help, wire,
+                                       0x43U, argc, argv);
+}
+
+// cmd_subaru_clear_dtcs — UDS Mode 0x04 (ClearDTCInformation OBD-II).
+// Per round-42 §3.3 step 3: try clearing DTCs as part of the recovery
+// sequence. May unstick an accumulated lockout state.
+int cmd_subaru_clear_dtcs(int argc, char *argv[]) {
+    constexpr std::array<std::uint8_t, 1> wire{0x04U};
+    static constexpr char const help[] =
+        "subaru-clear-dtcs — OBD-II Mode 04 (clear DTCs).\n"
+        "\n"
+        "Usage:\n"
+        "  subuwutuner-cli subaru-clear-dtcs --transport obdx --device COM4 \\\n"
+        "      [--timeout-ms 3000] [--verbose]\n"
+        "\n"
+        "Sends 04 and expects 44 positive response. Per round-42 §3.3:\n"
+        "follow with a power cycle to commit the clear.\n";
+    return run_simple_diagnostic_verb("subaru-clear-dtcs", help, wire,
+                                       0x44U, argc, argv);
+}
+
+// cmd_subaru_flash_commit — emit the COBB-confirmed end-of-install close.
+// Sends `0x37` (finalize, expects 0x77) then `0x31 01 02 02 01` (commit,
+// expects 0x71 01 02 02). Per round-40 §2.3 + round-42 supplement §2: this
+// is the close pattern COBB uses, and the close that the bench has NEVER
+// been sending across rounds 37-40. The accumulated "no-commit" state is
+// what's caused the bench's progressive degradation (round-42 main §3).
+//
+// This verb is the recovery primitive: after the bench inevitably gets into
+// a "uncommitted programming session" state, run this to actually commit so
+// the next power cycle starts from a clean ECU state.
+//
+// Preconditions: caller must already be in DSC 0x10 0x02 Programming session
+// (via subaru-dsc-unblock-sequence). The verb does NOT enter Phase C; it just
+// closes whatever state machine is currently active. NRC 0x22 on the 0x37
+// step is OK (state wasn't 1) — the 0x0202 commit may still succeed and is
+// what we actually need.
+int cmd_subaru_flash_commit(int argc, char *argv[]) {
+    std::optional<std::string> transport_kind;
+    std::string dll_path;
+    std::string device_path;
+    int timeout_ms = 10000;
+    bool verbose = false;
+    bool key_cycle_prompt = true;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr,
+                             "subaru-flash-commit: %s requires a value\n",
+                             name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--transport") {
+            if (auto const *v = require_arg("--transport"); v)
+                transport_kind = std::string{v};
+            else
+                return 2;
+        } else if (a == "--device") {
+            if (auto const *v = require_arg("--device"); v)
+                device_path = v;
+            else
+                return 2;
+        } else if (a == "--dll") {
+            if (auto const *v = require_arg("--dll"); v)
+                dll_path = v;
+            else
+                return 2;
+        } else if (a == "--timeout-ms") {
+            if (auto const *v = require_arg("--timeout-ms"); v) {
+                try {
+                    timeout_ms = std::stoi(v);
+                } catch (std::exception const &) {
+                    std::fprintf(
+                        stderr,
+                        "subaru-flash-commit: --timeout-ms must be integer\n");
+                    return 2;
+                }
+            } else {
+                return 2;
+            }
+        } else if (a == "--no-key-cycle-prompt") {
+            key_cycle_prompt = false;
+        } else if (a == "--verbose") {
+            verbose = true;
+        } else {
+            std::fprintf(stderr,
+                         "subaru-flash-commit: unknown option: %s\n", argv[i]);
+            return 2;
+        }
+    }
+
+    if (!transport_kind.has_value()) {
+        std::fputs(
+            "subaru-flash-commit — close the Programming session per round-40 §2.3.\n"
+            "\n"
+            "Usage:\n"
+            "  subuwutuner-cli subaru-flash-commit --transport obdx --device COM4 \\\n"
+            "      [--timeout-ms 10000] [--no-key-cycle-prompt] [--verbose]\n"
+            "\n"
+            "Sends `37` (finalize, expects 77) then `31 01 02 02 01` (commit,\n"
+            "expects 71 01 02 02). This is the close pattern COBB uses + the\n"
+            "close the bench has never sent (cause of round-37..40 degradation).\n"
+            "\n"
+            "Preconditions: must be in DSC 0x10 0x02 Programming session.\n"
+            "NRC 0x22 on the 0x37 step is OK (state wasn't 1); the 0x0202\n"
+            "commit may still succeed and is what we actually need.\n"
+            "\n"
+            "After the commit, the verb prompts you to perform a key cycle\n"
+            "(per round-42 supplement §2.4) — the ECU REQUIRES a real power\n"
+            "cycle to clear the post-Programming state flags.\n",
+            stderr);
+        return 2;
+    }
+
+    auto const kind = st::transport::parse_kind(*transport_kind);
+    if (!kind.has_value()) {
+        std::fprintf(stderr,
+                     "subaru-flash-commit: --transport '%s' not recognized\n",
+                     transport_kind->c_str());
+        return 2;
+    }
+    st::transport::TransportSpec const spec{*kind, dll_path, device_path};
+    auto t = st::transport::open_transport(spec);
+    if (!t.has_value()) {
+        std::fprintf(stderr, "subaru-flash-commit: %s\n",
+                     t.error().to_string().c_str());
+        return 1;
+    }
+    if (verbose)
+        st::transport::obdx::set_trace_enabled(true);
+    st::transport::LinkConfig const link{st::transport::LinkKind::CanIso15765,
+                                         500000, 0x000007E0, 0x000007E8};
+    if (auto s = (*t)->open(link); !s.has_value()) {
+        std::fprintf(stderr,
+                     "subaru-flash-commit: transport open failed: %s\n",
+                     s.error().to_string().c_str());
+        return 1;
+    }
+
+    // Step 1: single-byte 0x37 finalize.
+    constexpr std::array<std::uint8_t, 1> wire_37{0x37U};
+    std::fputs("subaru-flash-commit: [1/2] sending 37 (finalize)...\n",
+               stdout);
+    std::fflush(stdout);
+    auto r1 = (*t)->send_recv(std::span<std::uint8_t const>{wire_37},
+                              std::chrono::milliseconds{timeout_ms});
+    if (!r1.has_value()) {
+        std::fprintf(stderr, "subaru-flash-commit: [1/2] %s\n",
+                     r1.error().to_string().c_str());
+        return 1;
+    }
+    bool finalize_ok = false;
+    {
+        auto const &body = r1->data;
+        std::fputs("  response:", stdout);
+        for (auto b : body)
+            std::fprintf(stdout, " %02X", b);
+        std::fputc('\n', stdout);
+        if (!body.empty() && body[0] == 0x77U) {
+            std::fputs("  → POSITIVE (77) — state 1→2.\n", stdout);
+            finalize_ok = true;
+        } else if (body.size() >= 3 && body[0] == 0x7FU &&
+                   body[1] == 0x37U) {
+            std::fprintf(stdout,
+                         "  → NRC 0x%02X — state machine wasn't at 1; continuing "
+                         "to commit anyway (may still work).\n",
+                         body[2]);
+        } else {
+            std::fputs("  → UNEXPECTED; continuing to commit.\n", stdout);
+        }
+    }
+
+    // Step 2: 0x31 01 02 02 01 commit.
+    constexpr std::array<std::uint8_t, 5> wire_commit{
+        0x31U, 0x01U, 0x02U, 0x02U, 0x01U};
+    std::fputs("subaru-flash-commit: [2/2] sending 31 01 02 02 01 (commit)...\n",
+               stdout);
+    std::fflush(stdout);
+    auto r2 = (*t)->send_recv(std::span<std::uint8_t const>{wire_commit},
+                              std::chrono::milliseconds{timeout_ms});
+    if (!r2.has_value()) {
+        std::fprintf(stderr, "subaru-flash-commit: [2/2] %s\n",
+                     r2.error().to_string().c_str());
+        return 1;
+    }
+    auto const &body = r2->data;
+    std::fputs("  response:", stdout);
+    for (auto b : body)
+        std::fprintf(stdout, " %02X", b);
+    std::fputc('\n', stdout);
+    bool commit_ok = false;
+    if (body.size() >= 4 && body[0] == 0x71U && body[1] == 0x01U &&
+        body[2] == 0x02U && body[3] == 0x02U) {
+        std::fputs("  → POSITIVE 71 01 02 02 — commit complete.\n", stdout);
+        commit_ok = true;
+    } else if (body.size() >= 3 && body[0] == 0x7FU && body[1] == 0x31U) {
+        std::fprintf(stdout, "  → NRC 0x%02X — commit rejected.\n", body[2]);
+    } else {
+        std::fputs("  → UNEXPECTED response.\n", stdout);
+    }
+
+    if (commit_ok && key_cycle_prompt) {
+        std::fputs(
+            "\n"
+            "═══════════════════════════════════════════════════════════════\n"
+            "  USER ACTION REQUIRED (round-42 supplement §2.4):\n"
+            "  ──────────────────────────────────────────────────────────\n"
+            "  1. Turn the ignition OFF (key off).\n"
+            "  2. Wait AT LEAST 15 seconds (60+ for the safe recovery path).\n"
+            "  3. Turn the ignition back ON.\n"
+            "  4. Wait another 10-20 seconds for ECU re-init.\n"
+            "  ──────────────────────────────────────────────────────────\n"
+            "  WITHOUT this key cycle, the ECU's post-Programming flags\n"
+            "  won't clear and the next session will degrade.\n"
+            "═══════════════════════════════════════════════════════════════\n",
+            stdout);
+    }
+
+    if (!finalize_ok && !commit_ok)
+        return 1;
+    return commit_ok ? 0 : 1;
+}
+
+namespace {
+
+// SECTOR_TABLE — round-39 §2 / round-40 §2: the 25 distinct sector starts +
+// erase sizes the Phase D + Erase routine accepts. Phase D rejects any
+// start_addr that isn't a sector boundary, and the erase routine NRCs 0x22
+// if the length doesn't match the matching sector's size.
+struct SectorEntry {
+    std::uint32_t start;
+    std::uint32_t size;
+};
+constexpr std::array<SectorEntry, 25> kSectorTable{{
+    // Boot region (FACI-locked at FCU; SA L3 required to write)
+    {0x006000U, 0x002000U}, {0x008000U, 0x002000U}, {0x00A000U, 0x002000U},
+    {0x00C000U, 0x002000U}, {0x00E000U, 0x002000U},
+    // App region (SA L1 sufficient)
+    {0x010000U, 0x010000U}, {0x020000U, 0x010000U}, {0x030000U, 0x010000U},
+    {0x040000U, 0x010000U}, {0x050000U, 0x010000U}, {0x060000U, 0x010000U},
+    {0x070000U, 0x010000U}, {0x080000U, 0x010000U}, {0x090000U, 0x010000U},
+    // Top region (large erase blocks)
+    {0x0A0000U, 0x020000U}, {0x0C0000U, 0x020000U}, {0x0E0000U, 0x020000U},
+    {0x100000U, 0x020000U}, {0x120000U, 0x020000U}, {0x140000U, 0x020000U},
+    {0x160000U, 0x020000U}, {0x180000U, 0x020000U}, {0x1A0000U, 0x020000U},
+    {0x1C0000U, 0x020000U}, {0x1E0000U, 0x020000U},
+}};
+
+// Look up the sector that `addr` is the start of. Returns nullopt if not
+// found — partial-sector start_addrs are rejected.
+std::optional<SectorEntry> sector_for_start(std::uint32_t addr) {
+    for (auto const &s : kSectorTable) {
+        if (s.start == addr)
+            return s;
+    }
+    return std::nullopt;
+}
+
+}  // namespace
+
+// cmd_subaru_flash_write_cycle — the full COBB-style flash write for one
+// sector. Implements round-40 §2.2's per-sector cycle plus round-42 §2.3's
+// end-of-install commit + key-cycle prompt:
+//
+//   Phase D → Erase → B6×N → 0x37 → 0x0202 → (key cycle)
+//
+// Preconditions: caller must have already run subaru-dsc-unblock-sequence
+// (Phase C) on the same physical bench session. The verb does NOT include
+// Phase C — keeping it focused on the write cycle keeps the wire-level
+// behavior easy to audit. Bash-chaining unblock-sequence + this verb gives
+// the same tight-timing properties as a single combined verb would.
+//
+// MVP scope: single sector per invocation. Multi-sector chaining is left
+// for round-44+: COBB sends Phase D + Erase + B6×N per sector with NO inter-
+// sector close, ending with ONE 0x37 + ONE 0x0202. Doing that here requires
+// either accepting multiple --start-addr / --data-file pairs or reading a
+// full-ROM image + a sector mask. The MVP single-sector flow exercises the
+// critical close that's been missing from rounds 37-40.
+int cmd_subaru_flash_write_cycle(int argc, char *argv[]) {
+    std::optional<std::string> transport_kind;
+    std::string dll_path;
+    std::string device_path;
+    std::optional<std::uint32_t> start_addr;
+    std::string data_file_path;
+    std::optional<std::uint8_t> fill_byte;
+    int erase_timeout_ms = 30000;
+    int per_b6_timeout_ms = 3000;
+    bool no_key_cycle_prompt = false;
+    bool no_commit = false;
+    bool verbose = false;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr,
+                             "subaru-flash-write-cycle: %s requires a value\n",
+                             name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--transport") {
+            if (auto const *v = require_arg("--transport"); v)
+                transport_kind = std::string{v};
+            else
+                return 2;
+        } else if (a == "--device") {
+            if (auto const *v = require_arg("--device"); v)
+                device_path = v;
+            else
+                return 2;
+        } else if (a == "--dll") {
+            if (auto const *v = require_arg("--dll"); v)
+                dll_path = v;
+            else
+                return 2;
+        } else if (a == "--start-addr") {
+            if (auto const *v = require_arg("--start-addr"); v) {
+                try {
+                    start_addr = static_cast<std::uint32_t>(
+                        std::stoul(v, nullptr, 0));
+                } catch (std::exception const &) {
+                    std::fprintf(
+                        stderr,
+                        "subaru-flash-write-cycle: --start-addr '%s' not a "
+                        "valid hex (try 0x010000)\n",
+                        v);
+                    return 2;
+                }
+            } else {
+                return 2;
+            }
+        } else if (a == "--data-file") {
+            if (auto const *v = require_arg("--data-file"); v)
+                data_file_path = v;
+            else
+                return 2;
+        } else if (a == "--fill") {
+            if (auto const *v = require_arg("--fill"); v) {
+                try {
+                    fill_byte = static_cast<std::uint8_t>(
+                        std::stoul(v, nullptr, 0) & 0xFFU);
+                } catch (std::exception const &) {
+                    std::fprintf(stderr,
+                                 "subaru-flash-write-cycle: --fill '%s' not a "
+                                 "valid byte (try 0xFF)\n",
+                                 v);
+                    return 2;
+                }
+            } else {
+                return 2;
+            }
+        } else if (a == "--erase-timeout-ms") {
+            if (auto const *v = require_arg("--erase-timeout-ms"); v) {
+                try {
+                    erase_timeout_ms = std::stoi(v);
+                } catch (std::exception const &) {
+                    std::fprintf(
+                        stderr,
+                        "subaru-flash-write-cycle: --erase-timeout-ms must be "
+                        "integer\n");
+                    return 2;
+                }
+            } else {
+                return 2;
+            }
+        } else if (a == "--no-key-cycle-prompt") {
+            no_key_cycle_prompt = true;
+        } else if (a == "--no-commit") {
+            no_commit = true;
+        } else if (a == "--verbose") {
+            verbose = true;
+        } else {
+            std::fprintf(stderr,
+                         "subaru-flash-write-cycle: unknown option: %s\n",
+                         argv[i]);
+            return 2;
+        }
+    }
+
+    if (!transport_kind.has_value() || !start_addr.has_value() ||
+        (data_file_path.empty() && !fill_byte.has_value())) {
+        std::fputs(
+            "subaru-flash-write-cycle — write one sector via the COBB-confirmed\n"
+            "                          Phase D + Erase + B6×N + 0x37 + 0x0202\n"
+            "                          flow (round-40 §2 + round-42 §2.3).\n"
+            "\n"
+            "Usage:\n"
+            "  subuwutuner-cli subaru-flash-write-cycle \\\n"
+            "      --transport obdx --device COM4 \\\n"
+            "      --start-addr 0x010000 \\\n"
+            "      (--data-file <path> | --fill 0xFF) \\\n"
+            "      [--erase-timeout-ms 30000] [--no-commit]\n"
+            "      [--no-key-cycle-prompt] [--verbose]\n"
+            "\n"
+            "Preconditions: caller must have already run subaru-dsc-unblock-\n"
+            "sequence (Phase C). The recovery procedure per round-42 supplement\n"
+            "§4.2 wants:\n"
+            "    1. Power cycle 60-120s OFF\n"
+            "    2. subuwutuner-cli subaru-dsc-unblock-sequence ... --burst-write-extended\n"
+            "    3. subuwutuner-cli subaru-flash-write-cycle ... (this verb)\n"
+            "    4. Follow the on-screen key-cycle prompt\n"
+            "\n"
+            "--start-addr must equal a sector boundary. See round-39 §2\n"
+            "SECTOR_TABLE for valid starts (0x6000..0x1E0000).\n"
+            "\n"
+            "Data input: either --data-file <path> (binary, exactly sector\n"
+            "size) or --fill <byte> (fill the whole sector with one byte).\n"
+            "0xFF fill = clean erased state with no rewrites.\n"
+            "\n"
+            "--no-commit skips the 0x37 + 0x0202 close — debug only; LEAVES\n"
+            "the ECU in 'uncommitted programming' state which is what caused\n"
+            "the round-37..40 progressive degradation. NEVER use in production.\n",
+            stderr);
+        return 2;
+    }
+
+    // Validate sector boundary.
+    auto const sector = sector_for_start(*start_addr);
+    if (!sector.has_value()) {
+        std::fprintf(stderr,
+                     "subaru-flash-write-cycle: --start-addr 0x%06X is not a "
+                     "sector boundary; see round-39 §2 SECTOR_TABLE.\n",
+                     *start_addr);
+        return 2;
+    }
+    std::uint32_t const sector_size = sector->size;
+
+    // Load data: file > fill > error.
+    std::vector<std::uint8_t> data;
+    if (!data_file_path.empty()) {
+        std::ifstream f(data_file_path, std::ios::binary);
+        if (!f) {
+            std::fprintf(stderr,
+                         "subaru-flash-write-cycle: cannot open --data-file "
+                         "'%s'\n",
+                         data_file_path.c_str());
+            return 1;
+        }
+        data.assign(std::istreambuf_iterator<char>(f),
+                    std::istreambuf_iterator<char>());
+        if (data.size() != sector_size) {
+            std::fprintf(stderr,
+                         "subaru-flash-write-cycle: --data-file is %zu bytes "
+                         "but sector 0x%06X expects 0x%X (%u) bytes.\n",
+                         data.size(), *start_addr, sector_size, sector_size);
+            return 2;
+        }
+    } else {
+        data.assign(sector_size, *fill_byte);
+    }
+    std::uint32_t const num_blocks = sector_size / 256;
+    if (sector_size % 256 != 0) {
+        std::fprintf(stderr,
+                     "subaru-flash-write-cycle: internal — sector size 0x%X "
+                     "not multiple of 256.\n",
+                     sector_size);
+        return 1;
+    }
+
+    // Open transport.
+    auto const kind = st::transport::parse_kind(*transport_kind);
+    if (!kind.has_value()) {
+        std::fprintf(
+            stderr,
+            "subaru-flash-write-cycle: --transport '%s' not recognized\n",
+            transport_kind->c_str());
+        return 2;
+    }
+    st::transport::TransportSpec const spec{*kind, dll_path, device_path};
+    auto t = st::transport::open_transport(spec);
+    if (!t.has_value()) {
+        std::fprintf(stderr, "subaru-flash-write-cycle: %s\n",
+                     t.error().to_string().c_str());
+        return 1;
+    }
+    if (verbose)
+        st::transport::obdx::set_trace_enabled(true);
+    st::transport::LinkConfig const link{st::transport::LinkKind::CanIso15765,
+                                         500000, 0x000007E0, 0x000007E8};
+    if (auto s = (*t)->open(link); !s.has_value()) {
+        std::fprintf(stderr,
+                     "subaru-flash-write-cycle: transport open failed: %s\n",
+                     s.error().to_string().c_str());
+        return 1;
+    }
+
+    auto const send = [&](std::string_view label,
+                          std::span<std::uint8_t const> wire,
+                          std::chrono::milliseconds timeout)
+        -> std::optional<std::vector<std::uint8_t>> {
+        auto r = (*t)->send_recv(wire, timeout);
+        if (!r.has_value()) {
+            std::fprintf(stderr, "subaru-flash-write-cycle: %.*s: %s\n",
+                         static_cast<int>(label.size()), label.data(),
+                         r.error().to_string().c_str());
+            return std::nullopt;
+        }
+        return r->data;
+    };
+
+    // [1/5] Phase D.
+    std::array<std::uint8_t, 9> phase_d{
+        0x34U, 0x04U, 0x33U,
+        static_cast<std::uint8_t>((*start_addr >> 16) & 0xFFU),
+        static_cast<std::uint8_t>((*start_addr >> 8) & 0xFFU),
+        static_cast<std::uint8_t>(*start_addr & 0xFFU),
+        static_cast<std::uint8_t>((sector_size >> 16) & 0xFFU),
+        static_cast<std::uint8_t>((sector_size >> 8) & 0xFFU),
+        static_cast<std::uint8_t>(sector_size & 0xFFU),
+    };
+    std::fprintf(stdout,
+                 "subaru-flash-write-cycle: [1/5] Phase D — sector 0x%06X / "
+                 "0x%X bytes (%u blocks)\n",
+                 *start_addr, sector_size, num_blocks);
+    std::fflush(stdout);
+    auto r1 = send("Phase D", phase_d, std::chrono::milliseconds{3000});
+    if (!r1.has_value())
+        return 1;
+    if (r1->size() < 4 || (*r1)[0] != 0x74U) {
+        std::fputs("  Phase D rejected:", stdout);
+        for (auto b : *r1)
+            std::fprintf(stdout, " %02X", b);
+        std::fputc('\n', stdout);
+        return 1;
+    }
+    std::fputs("  → 74 20 01 04\n", stdout);
+
+    // [2/5] Erase.
+    constexpr std::array<std::uint8_t, 8> erase_wire{
+        0x31U, 0x01U, 0x02U, 0x01U, 0x0FU, 0xFFU, 0xFFU, 0xFFU};
+    std::fputs(
+        "subaru-flash-write-cycle: [2/5] Erase — 31 01 02 01 0F FF FF FF\n",
+        stdout);
+    std::fflush(stdout);
+    auto t_erase = std::chrono::steady_clock::now();
+    auto r2 = send("Erase", erase_wire,
+                   std::chrono::milliseconds{erase_timeout_ms});
+    if (!r2.has_value())
+        return 1;
+    auto const erase_elapsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - t_erase);
+    if (r2->size() < 4 || (*r2)[0] != 0x71U) {
+        std::fprintf(stdout, "  Erase rejected (after %lld ms):",
+                     erase_elapsed.count());
+        for (auto b : *r2)
+            std::fprintf(stdout, " %02X", b);
+        std::fputc('\n', stdout);
+        if (r2->size() >= 3 && (*r2)[0] == 0x7FU && (*r2)[2] == 0x33U) {
+            std::fputs(
+                "  → NRC 0x33 — SA decayed since Phase C. Re-run "
+                "subaru-dsc-unblock-sequence and retry within 2s.\n",
+                stdout);
+        }
+        return 1;
+    }
+    std::fprintf(stdout, "  → 71 01 02 01 (elapsed %lld ms)\n",
+                 erase_elapsed.count());
+
+    // [3/5] B6 × num_blocks (256-byte blocks, contiguous, last is end-aligned).
+    std::fprintf(stdout,
+                 "subaru-flash-write-cycle: [3/5] Writing %u × 256-byte "
+                 "blocks...\n",
+                 num_blocks);
+    std::fflush(stdout);
+    std::vector<std::uint8_t> b6_wire(260);
+    b6_wire[0] = 0xB6U;
+    auto t_b6 = std::chrono::steady_clock::now();
+    for (std::uint32_t i = 0; i < num_blocks; ++i) {
+        std::uint32_t const addr = *start_addr + i * 256U;
+        b6_wire[1] = static_cast<std::uint8_t>((addr >> 16) & 0xFFU);
+        b6_wire[2] = static_cast<std::uint8_t>((addr >> 8) & 0xFFU);
+        b6_wire[3] = static_cast<std::uint8_t>(addr & 0xFFU);
+        std::memcpy(b6_wire.data() + 4, data.data() + i * 256, 256);
+        auto r = send("B6", b6_wire,
+                      std::chrono::milliseconds{per_b6_timeout_ms});
+        if (!r.has_value())
+            return 1;
+        if (r->empty() || (*r)[0] != 0xF6U) {
+            std::fprintf(stdout,
+                         "  B6 block %u/%u @ 0x%06X rejected:", i + 1,
+                         num_blocks, addr);
+            for (auto b : *r)
+                std::fprintf(stdout, " %02X", b);
+            std::fputc('\n', stdout);
+            return 1;
+        }
+        // Progress every 16 blocks (avoid spamming stdout for 256-block sectors).
+        if (i % 16U == 15U || i + 1 == num_blocks) {
+            std::fprintf(stdout, "    %u/%u blocks (last @ 0x%06X)\r",
+                         i + 1, num_blocks, addr);
+            std::fflush(stdout);
+        }
+    }
+    auto const b6_elapsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - t_b6);
+    std::fprintf(stdout,
+                 "\n  → All %u blocks F6 (elapsed %lld ms)\n", num_blocks,
+                 b6_elapsed.count());
+
+    if (no_commit) {
+        std::fputs(
+            "\n--no-commit set: SKIPPING 0x37 + 0x0202 close.\n"
+            "⚠️  Leaving ECU in uncommitted-programming state. This is what\n"
+            "    caused round-37..40 progressive degradation. Don't power\n"
+            "    cycle without running subaru-flash-commit first to close.\n",
+            stdout);
+        return 0;
+    }
+
+    // [4/5] 0x37 finalize.
+    constexpr std::array<std::uint8_t, 1> finalize_wire{0x37U};
+    std::fputs("subaru-flash-write-cycle: [4/5] 37 (finalize)\n", stdout);
+    auto r4 = send("Finalize", finalize_wire,
+                   std::chrono::milliseconds{3000});
+    if (!r4.has_value())
+        return 1;
+    if (r4->empty() || (*r4)[0] != 0x77U) {
+        std::fputs("  Finalize rejected:", stdout);
+        for (auto b : *r4)
+            std::fprintf(stdout, " %02X", b);
+        std::fputc('\n', stdout);
+        return 1;
+    }
+    std::fputs("  → 77\n", stdout);
+
+    // [5/5] 0x31 01 02 02 01 commit.
+    constexpr std::array<std::uint8_t, 5> commit_wire{
+        0x31U, 0x01U, 0x02U, 0x02U, 0x01U};
+    std::fputs("subaru-flash-write-cycle: [5/5] 31 01 02 02 01 (commit)\n",
+               stdout);
+    auto r5 = send("Commit", commit_wire,
+                   std::chrono::milliseconds{erase_timeout_ms});
+    if (!r5.has_value())
+        return 1;
+    if (r5->size() < 4 || (*r5)[0] != 0x71U) {
+        std::fputs("  Commit rejected:", stdout);
+        for (auto b : *r5)
+            std::fprintf(stdout, " %02X", b);
+        std::fputc('\n', stdout);
+        return 1;
+    }
+    std::fputs("  → 71 01 02 02\n", stdout);
+
+    std::fputs("\n✓ Sector write committed.\n", stdout);
+
+    if (!no_key_cycle_prompt) {
+        std::fputs(
+            "\n"
+            "═══════════════════════════════════════════════════════════════\n"
+            "  USER ACTION REQUIRED (round-42 supplement §2.4):\n"
+            "  ──────────────────────────────────────────────────────────\n"
+            "  1. Turn the ignition OFF (key off).\n"
+            "  2. Wait AT LEAST 15 seconds (60+ for the safe recovery path).\n"
+            "  3. Turn the ignition back ON.\n"
+            "  4. Wait another 10-20 seconds for ECU re-init.\n"
+            "  ──────────────────────────────────────────────────────────\n"
+            "  WITHOUT this key cycle, the ECU's post-Programming flags\n"
+            "  won't clear and the next session will degrade.\n"
+            "═══════════════════════════════════════════════════════════════\n",
+            stdout);
+    }
+
+    return 0;
+}
+
+// cmd_subaru_flash_restore_from_stock — atomic restore-from-stock per round-43 §4.
+//
+// Reads a 2 MB stock ROM image, writes one-or-many sectors back to the ECU
+// using the canonical COBB-style Phase D + Erase + B6×N per sector + a SINGLE
+// final 0x37 + 0x0202 (round-40 §2.2 / round-42 supplement §2.3). Designed
+// for breaking out of the boot-recovery-mode lockout per round-43 §4.3.
+//
+// Precondition: caller must have already run subaru-dsc-unblock-sequence
+// (Phase C) in the same physical bench session, within ~2s of this verb
+// firing. Atomic chain: bash `subaru-dsc-unblock-sequence && subaru-flash-
+// restore-from-stock` keeps the gap to a few hundred ms.
+//
+// Recovery flow per round-43:
+//   1. Power off donor 5+ minutes (your hands)
+//   2. Power on, wait 60s
+//   3. subaru-mode1-probe (one alive check only)
+//   4. subaru-dsc-unblock-sequence ... --burst-write-extended
+//   5. subuwutuner-cli subaru-flash-restore-from-stock ... (this verb)
+//   6. Follow key-cycle prompt
+//
+// If the verb's Phase D times out for the first sector, the donor is locked
+// in recovery mode and Phase D is being dropped by the recovery dispatcher.
+// At that point the only remaining options are JTAG (Renesas E2 Lite ~$60)
+// per round-43 §5.1 or a fresh donor.
+int cmd_subaru_flash_restore_from_stock(int argc, char *argv[]) {
+    std::optional<std::string> transport_kind;
+    std::string dll_path;
+    std::string device_path;
+    std::string stock_rom_path;
+    std::vector<std::uint32_t> requested_sectors;  // empty → all app sectors
+    int erase_timeout_ms = 30000;
+    int per_b6_timeout_ms = 5000;
+    int phase_d_timeout_ms = 10000;
+    bool no_key_cycle_prompt = false;
+    bool no_commit = false;
+    bool dry_run = false;
+    bool verbose = false;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr,
+                             "subaru-flash-restore-from-stock: %s requires a "
+                             "value\n",
+                             name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--transport") {
+            if (auto const *v = require_arg("--transport"); v)
+                transport_kind = std::string{v};
+            else
+                return 2;
+        } else if (a == "--device") {
+            if (auto const *v = require_arg("--device"); v)
+                device_path = v;
+            else
+                return 2;
+        } else if (a == "--dll") {
+            if (auto const *v = require_arg("--dll"); v)
+                dll_path = v;
+            else
+                return 2;
+        } else if (a == "--stock-rom") {
+            if (auto const *v = require_arg("--stock-rom"); v)
+                stock_rom_path = v;
+            else
+                return 2;
+        } else if (a == "--sector") {
+            if (auto const *v = require_arg("--sector"); v) {
+                try {
+                    requested_sectors.push_back(static_cast<std::uint32_t>(
+                        std::stoul(v, nullptr, 0)));
+                } catch (std::exception const &) {
+                    std::fprintf(
+                        stderr,
+                        "subaru-flash-restore-from-stock: --sector '%s' not a "
+                        "valid hex (try 0x010000)\n",
+                        v);
+                    return 2;
+                }
+            } else {
+                return 2;
+            }
+        } else if (a == "--erase-timeout-ms") {
+            if (auto const *v = require_arg("--erase-timeout-ms"); v) {
+                try {
+                    erase_timeout_ms = std::stoi(v);
+                } catch (std::exception const &) {
+                    return 2;
+                }
+            } else {
+                return 2;
+            }
+        } else if (a == "--phase-d-timeout-ms") {
+            if (auto const *v = require_arg("--phase-d-timeout-ms"); v) {
+                try {
+                    phase_d_timeout_ms = std::stoi(v);
+                } catch (std::exception const &) {
+                    return 2;
+                }
+            } else {
+                return 2;
+            }
+        } else if (a == "--no-key-cycle-prompt") {
+            no_key_cycle_prompt = true;
+        } else if (a == "--no-commit") {
+            no_commit = true;
+        } else if (a == "--dry-run") {
+            dry_run = true;
+        } else if (a == "--verbose") {
+            verbose = true;
+        } else {
+            std::fprintf(stderr,
+                         "subaru-flash-restore-from-stock: unknown option: %s\n",
+                         argv[i]);
+            return 2;
+        }
+    }
+
+    if (!transport_kind.has_value() || stock_rom_path.empty()) {
+        std::fputs(
+            "subaru-flash-restore-from-stock — atomic restore from a stock ROM image\n"
+            "                                  per round-43 §4.\n"
+            "\n"
+            "Usage:\n"
+            "  subuwutuner-cli subaru-flash-restore-from-stock \\\n"
+            "      --transport obdx --device COM4 \\\n"
+            "      --stock-rom <path-to-2MB-stock-rom.bin> \\\n"
+            "      [--sector 0x010000 [--sector 0x020000 ...]]   # default: all app sectors\n"
+            "      [--erase-timeout-ms 30000] [--phase-d-timeout-ms 10000]\n"
+            "      [--no-commit] [--no-key-cycle-prompt] [--dry-run] [--verbose]\n"
+            "\n"
+            "Recovery flow (round-43 §4.3):\n"
+            "  1. Power off donor 5+ minutes\n"
+            "  2. Power on, wait 60s\n"
+            "  3. subaru-mode1-probe   (one alive check only — NO other probes)\n"
+            "  4. subaru-dsc-unblock-sequence ... --burst-write-extended\n"
+            "  5. (this verb) subaru-flash-restore-from-stock ...\n"
+            "  6. Follow on-screen key-cycle prompt\n"
+            "\n"
+            "If Phase D times out for the first sector, the donor is in boot\n"
+            "recovery mode and Phase D is being silently dropped. JTAG via\n"
+            "Renesas E2 Lite (~$60) is the canonical next step per round-43 §5.1.\n"
+            "\n"
+            "--sector may be passed multiple times to restore multiple sectors.\n"
+            "Without --sector, all writable app sectors (0x10000..0x90000 + the\n"
+            "top region) are targeted. Note: bigger restores = more wall time +\n"
+            "more chances to wedge.\n"
+            "\n"
+            "Stock ROM file must be exactly 2 MiB (2097152 bytes).\n",
+            stderr);
+        return 2;
+    }
+
+    // Load stock ROM.
+    std::vector<std::uint8_t> stock_rom;
+    {
+        std::ifstream f(stock_rom_path, std::ios::binary | std::ios::ate);
+        if (!f) {
+            std::fprintf(stderr,
+                         "subaru-flash-restore-from-stock: cannot open --stock-rom"
+                         " '%s'\n",
+                         stock_rom_path.c_str());
+            return 1;
+        }
+        auto const sz = static_cast<std::streamoff>(f.tellg());
+        if (sz != static_cast<std::streamoff>(0x200000)) {
+            std::fprintf(stderr,
+                         "subaru-flash-restore-from-stock: --stock-rom '%s' is "
+                         "%lld bytes, expected 2097152 (2 MiB)\n",
+                         stock_rom_path.c_str(),
+                         static_cast<long long>(sz));
+            return 2;
+        }
+        stock_rom.resize(0x200000U);
+        f.seekg(0, std::ios::beg);
+        if (!f.read(reinterpret_cast<char *>(stock_rom.data()), 0x200000)) {
+            std::fprintf(stderr,
+                         "subaru-flash-restore-from-stock: read failed on "
+                         "'%s'\n",
+                         stock_rom_path.c_str());
+            return 1;
+        }
+    }
+
+    // Build target sector list.
+    std::vector<SectorEntry> targets;
+    if (requested_sectors.empty()) {
+        for (auto const &s : kSectorTable) {
+            if (s.start >= 0x010000U)
+                targets.push_back(s);
+        }
+    } else {
+        for (auto const addr : requested_sectors) {
+            auto found = sector_for_start(addr);
+            if (!found.has_value()) {
+                std::fprintf(stderr,
+                             "subaru-flash-restore-from-stock: --sector 0x%06X is"
+                             " not a sector boundary; see round-39 §2 SECTOR_TABLE\n",
+                             addr);
+                return 2;
+            }
+            targets.push_back(*found);
+        }
+    }
+
+    std::fprintf(stdout,
+                 "subaru-flash-restore-from-stock: %zu sector(s) targeted, "
+                 "%u KB total\n",
+                 targets.size(),
+                 [&] {
+                     std::uint32_t total = 0;
+                     for (auto const &s : targets)
+                         total += s.size;
+                     return total / 1024;
+                 }());
+    for (auto const &s : targets) {
+        std::fprintf(stdout, "  0x%06X .. 0x%06X  (%u KB)\n", s.start,
+                     s.start + s.size - 1, s.size / 1024);
+    }
+
+    if (dry_run) {
+        std::fputs("\n[dry-run] No wires will be sent.\n", stdout);
+        return 0;
+    }
+
+    // Open transport.
+    auto const kind = st::transport::parse_kind(*transport_kind);
+    if (!kind.has_value()) {
+        std::fprintf(
+            stderr,
+            "subaru-flash-restore-from-stock: --transport '%s' not recognized\n",
+            transport_kind->c_str());
+        return 2;
+    }
+    st::transport::TransportSpec const spec{*kind, dll_path, device_path};
+    auto t = st::transport::open_transport(spec);
+    if (!t.has_value()) {
+        std::fprintf(stderr, "subaru-flash-restore-from-stock: %s\n",
+                     t.error().to_string().c_str());
+        return 1;
+    }
+    if (verbose)
+        st::transport::obdx::set_trace_enabled(true);
+    st::transport::LinkConfig const link{st::transport::LinkKind::CanIso15765,
+                                         500000, 0x000007E0, 0x000007E8};
+    if (auto s = (*t)->open(link); !s.has_value()) {
+        std::fprintf(
+            stderr,
+            "subaru-flash-restore-from-stock: transport open failed: %s\n",
+            s.error().to_string().c_str());
+        return 1;
+    }
+
+    auto const send = [&](std::string_view label,
+                          std::span<std::uint8_t const> wire,
+                          std::chrono::milliseconds timeout)
+        -> std::optional<std::vector<std::uint8_t>> {
+        auto r = (*t)->send_recv(wire, timeout);
+        if (!r.has_value()) {
+            std::fprintf(stderr,
+                         "subaru-flash-restore-from-stock: %.*s: %s\n",
+                         static_cast<int>(label.size()), label.data(),
+                         r.error().to_string().c_str());
+            return std::nullopt;
+        }
+        return r->data;
+    };
+
+    // Per-sector loop: Phase D + Erase + B6×N.  No 0x37 / 0x0202 between sectors.
+    std::vector<std::uint8_t> b6_wire(260);
+    b6_wire[0] = 0xB6U;
+    auto const t_total = std::chrono::steady_clock::now();
+    for (std::size_t s_idx = 0; s_idx < targets.size(); ++s_idx) {
+        auto const &sector = targets[s_idx];
+        std::uint32_t const sector_size = sector.size;
+        std::uint32_t const num_blocks = sector_size / 256;
+        std::fprintf(stdout,
+                     "\n[sector %zu/%zu] 0x%06X / %u KB (%u blocks)\n",
+                     s_idx + 1, targets.size(), sector.start, sector_size / 1024,
+                     num_blocks);
+
+        // Phase D.
+        std::array<std::uint8_t, 9> phase_d{
+            0x34U, 0x04U, 0x33U,
+            static_cast<std::uint8_t>((sector.start >> 16) & 0xFFU),
+            static_cast<std::uint8_t>((sector.start >> 8) & 0xFFU),
+            static_cast<std::uint8_t>(sector.start & 0xFFU),
+            static_cast<std::uint8_t>((sector_size >> 16) & 0xFFU),
+            static_cast<std::uint8_t>((sector_size >> 8) & 0xFFU),
+            static_cast<std::uint8_t>(sector_size & 0xFFU),
+        };
+        auto pd = send("Phase D", phase_d,
+                       std::chrono::milliseconds{phase_d_timeout_ms});
+        if (!pd.has_value())
+            return 1;
+        if (pd->size() < 4 || (*pd)[0] != 0x74U) {
+            std::fputs("  Phase D rejected:", stdout);
+            for (auto b : *pd)
+                std::fprintf(stdout, " %02X", b);
+            std::fputc('\n', stdout);
+            if (s_idx == 0) {
+                std::fputs(
+                    "\n"
+                    "⚠️  Phase D silently dropped on the FIRST sector — donor "
+                    "is in boot recovery mode and the recovery dispatcher\n"
+                    "    isn't routing 0x34 to any handler. UDS recovery is "
+                    "not possible from here.\n"
+                    "    Next step: JTAG via Renesas E2 Lite (~$60) per\n"
+                    "    round-43 §5.1.\n",
+                    stdout);
+            }
+            return 1;
+        }
+        std::fputs("  Phase D → 74 20 01 04\n", stdout);
+
+        // Erase.
+        constexpr std::array<std::uint8_t, 8> erase_wire{
+            0x31U, 0x01U, 0x02U, 0x01U, 0x0FU, 0xFFU, 0xFFU, 0xFFU};
+        auto t_erase = std::chrono::steady_clock::now();
+        auto er = send("Erase", erase_wire,
+                       std::chrono::milliseconds{erase_timeout_ms});
+        if (!er.has_value())
+            return 1;
+        auto const erase_elapsed =
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - t_erase);
+        if (er->size() < 4 || (*er)[0] != 0x71U) {
+            std::fprintf(stdout, "  Erase rejected (after %lld ms):",
+                         erase_elapsed.count());
+            for (auto b : *er)
+                std::fprintf(stdout, " %02X", b);
+            std::fputc('\n', stdout);
+            return 1;
+        }
+        std::fprintf(stdout, "  Erase → 71 01 02 01 (%lld ms)\n",
+                     erase_elapsed.count());
+
+        // B6 loop.
+        auto t_b6 = std::chrono::steady_clock::now();
+        for (std::uint32_t i = 0; i < num_blocks; ++i) {
+            std::uint32_t const addr = sector.start + i * 256U;
+            b6_wire[1] = static_cast<std::uint8_t>((addr >> 16) & 0xFFU);
+            b6_wire[2] = static_cast<std::uint8_t>((addr >> 8) & 0xFFU);
+            b6_wire[3] = static_cast<std::uint8_t>(addr & 0xFFU);
+            std::memcpy(b6_wire.data() + 4, stock_rom.data() + addr, 256);
+            auto br = send("B6", b6_wire,
+                           std::chrono::milliseconds{per_b6_timeout_ms});
+            if (!br.has_value())
+                return 1;
+            if (br->empty() || (*br)[0] != 0xF6U) {
+                std::fprintf(stdout,
+                             "\n  B6 block %u/%u @ 0x%06X rejected:", i + 1,
+                             num_blocks, addr);
+                for (auto b : *br)
+                    std::fprintf(stdout, " %02X", b);
+                std::fputc('\n', stdout);
+                return 1;
+            }
+            if (i % 32U == 31U || i + 1 == num_blocks) {
+                std::fprintf(stdout, "    %u/%u blocks (last @ 0x%06X)\r",
+                             i + 1, num_blocks, addr);
+                std::fflush(stdout);
+            }
+        }
+        auto const b6_elapsed =
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - t_b6);
+        std::fprintf(stdout, "\n  All %u blocks F6 (%lld ms)\n", num_blocks,
+                     b6_elapsed.count());
+    }
+
+    auto const elapsed_so_far =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - t_total);
+    std::fprintf(stdout, "\nAll sectors written (%lld ms total)\n",
+                 elapsed_so_far.count());
+
+    if (no_commit) {
+        std::fputs(
+            "\n--no-commit set: SKIPPING 0x37 + 0x0202 close.\n"
+            "⚠️  This LEAVES the ECU in uncommitted-programming state — exactly\n"
+            "    what caused round-37..40 progressive degradation. NEVER do\n"
+            "    this in production.\n",
+            stdout);
+        return 0;
+    }
+
+    // Final 0x37 finalize.
+    constexpr std::array<std::uint8_t, 1> finalize_wire{0x37U};
+    std::fputs("\n[close 1/2] 37 (finalize)\n", stdout);
+    auto fr = send("Finalize", finalize_wire,
+                   std::chrono::milliseconds{5000});
+    if (!fr.has_value())
+        return 1;
+    if (fr->empty() || (*fr)[0] != 0x77U) {
+        std::fputs("  Finalize rejected:", stdout);
+        for (auto b : *fr)
+            std::fprintf(stdout, " %02X", b);
+        std::fputc('\n', stdout);
+        return 1;
+    }
+    std::fputs("  → 77\n", stdout);
+
+    // Final 0x31 01 02 02 01 commit.
+    constexpr std::array<std::uint8_t, 5> commit_wire{
+        0x31U, 0x01U, 0x02U, 0x02U, 0x01U};
+    std::fputs("[close 2/2] 31 01 02 02 01 (commit)\n", stdout);
+    auto cr = send("Commit", commit_wire,
+                   std::chrono::milliseconds{erase_timeout_ms});
+    if (!cr.has_value())
+        return 1;
+    if (cr->size() < 4 || (*cr)[0] != 0x71U) {
+        std::fputs("  Commit rejected:", stdout);
+        for (auto b : *cr)
+            std::fprintf(stdout, " %02X", b);
+        std::fputc('\n', stdout);
+        return 1;
+    }
+    std::fputs("  → 71 01 02 02\n", stdout);
+
+    std::fputs("\n✓ Restore-from-stock committed.\n", stdout);
+
+    if (!no_key_cycle_prompt) {
+        std::fputs(
+            "\n"
+            "═══════════════════════════════════════════════════════════════\n"
+            "  USER ACTION REQUIRED (round-42 supplement §2.4):\n"
+            "  ──────────────────────────────────────────────────────────\n"
+            "  1. Turn the ignition OFF (key off).\n"
+            "  2. Wait AT LEAST 15 seconds (60+ for the safe recovery path).\n"
+            "  3. Turn the ignition back ON.\n"
+            "  4. Wait another 10-20 seconds for ECU re-init.\n"
+            "  ──────────────────────────────────────────────────────────\n"
+            "  WITHOUT this key cycle, the ECU's post-Programming flags\n"
+            "  won't clear and the boot integrity markers won't refresh.\n"
+            "═══════════════════════════════════════════════════════════════\n",
+            stdout);
+    }
+
     return 0;
 }
 
@@ -25352,6 +28078,27 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "subaru-flash-exit") {
         return cmd_subaru_flash_exit(argc - 2, argv + 2);
+    }
+    if (cmd == "subaru-flash-erase") {
+        return cmd_subaru_flash_erase(argc - 2, argv + 2);
+    }
+    if (cmd == "subaru-mode1-probe") {
+        return cmd_subaru_mode1_probe(argc - 2, argv + 2);
+    }
+    if (cmd == "subaru-read-dtcs") {
+        return cmd_subaru_read_dtcs(argc - 2, argv + 2);
+    }
+    if (cmd == "subaru-clear-dtcs") {
+        return cmd_subaru_clear_dtcs(argc - 2, argv + 2);
+    }
+    if (cmd == "subaru-flash-commit") {
+        return cmd_subaru_flash_commit(argc - 2, argv + 2);
+    }
+    if (cmd == "subaru-flash-write-cycle") {
+        return cmd_subaru_flash_write_cycle(argc - 2, argv + 2);
+    }
+    if (cmd == "subaru-flash-restore-from-stock") {
+        return cmd_subaru_flash_restore_from_stock(argc - 2, argv + 2);
     }
     if (cmd == "subaru-flash-bulk-transfer") {
         return cmd_subaru_flash_bulk_transfer(argc - 2, argv + 2);
