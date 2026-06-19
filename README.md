@@ -269,6 +269,56 @@ The CI matrix runs **~1700 C++ tests + 36 Python tests** across Win MSVC, macOS 
 
 ---
 
+## What We Learned by Killing Our First ECU
+
+Fifty-seven structured analyst↔implementer rounds across a junkyard LF79002P bench rig. The bench died on round 57. Bench rig two will not make the same mistakes — probably it will find new ones. In rough order, what came out of those rounds:
+
+### Protocol findings (the part that survives the bench)
+
+- **Phase C entry — DSC `0x10 0x02` unblock.** A 5-write Mode `0x3D` burst clears the F2/F3/F4 fault cascade ahead of the aggregator tick, then `10 02` grants `50 02`. Implemented in `subaru-dsc-unblock-sequence --burst-write-extended`. Bench-validated repeatably; survived a half-dozen power cycles unchanged.
+
+- **Phase D + flash write chain.** Wire is `34 04 33 <addr-3> <size-3>` → `74 20 01 04`. SA L1 + Programming session is sufficient; SA L3 is *not* required for Phase D (round-49 thought otherwise, round-51 refuted it). Phase D accepts negotiations up to at least 2 MB. Erase via `31 01 02 01 0F FF FF FF` is range-scoped to the negotiated range. `0xB6` is fixed at exactly 260 wire bytes (SID + 3-addr + 256-data). `0x37` takes no body. The full chain lives in `subaru-flash-write-cycle` and `subaru-dsc-unblock-sequence --write-cycle`.
+
+- **Commit gate.** Wire `31 01 02 02 01`. Handler decompiled at ROM `0x319E`. Three preconditions: session-state cell == 5, optionRecord == 1, and `u16 BE sum(0x6000..0x200000) == 0x5AA5`. That sentinel is **the brick-protection contract**: every production tune must preserve it. COBB tunes do; ours will. The sum helper at ROM `0x3582` is a naive u16 BE accumulator — no skip ranges, no masking, no special cells.
+
+- **Boot integrity.** `FUN_00000C54` three-signature gate before the application JMP at `0x001F094C`: `0x5555` at `0x6000` (in FACI-locked EB02), `0xAAAA` at `0x1FFFF2`, and `*0x6C == *0x6010`. Any drift in those bytes and the ECU runs CPU but never powers up its CAN transceiver.
+
+- **SecurityAccess.** Subaru SSMCAN1 family reverse-engineered clean: factory 16-round Feistel + aftermarket L1 and L3 variants, all CLI-selectable via `--sa-variant`. Aftermarket L1 is the bench-default and works against fresh Programming sessions.
+
+- **Dispatcher latch.** Entering Programming session swaps the SID dispatcher to flash-protocol-only routing. Only `0x34`, `0xB6`, `0xB7`, `0x37` are routed afterward; everything else returns NRC `0x11`. The swap is permanent until power cycle — UDS `0x11` reset doesn't escape, `0x3E` TesterPresent doesn't escape, completing the flash chain doesn't escape. Empirically confirmed across many attempts.
+
+- **Sector + sum map.** Per-sector u16 BE sums for the reference donor are recorded; EB02 / EB03 / EB04A-C / EB05 / EB06–14 boundaries and FACI-lock state are characterized. EB02 is FACI-locked (writes silent at the protocol layer); EB03–EB14 are writable via the chain above.
+
+- **SBOX identity model (round 39).** `0xB7` readback is a Feistel hash, not raw bytes — except when the input u32's R-half passes the identity-boundary condition (no 5-bit chunk equal to `0x1F`). Most u32s pass identity, so most readbacks look raw. When R contains a `0x1F` chunk, the bytes come back hashed. Different Programming sessions can have different SBOX states; **byte-for-byte cross-session comparison of `0xB7` output is unsafe**. Use SSM-A8 RMBA for verification.
+
+- **State machine.** The COBB-confirmed protocol cycles state `0 → 1` on a sector-end-aligned `0xB6`, `1 → 2` on `0x37`, and `2 → 0` on `0xB7` at the negotiated start. Commit requires state `0` plus the sum sentinel. (We later refuted "B7 always transitions state 2→0" — sometimes it stays at 2 — but the rest holds.)
+
+### How we lost the bench
+
+Three layered mistakes, each defensible alone.
+
+**The commit gate exists for a reason.** Subaru's FA20DIT firmware refuses to commit any flash write unless `u16 BE sum(0x6000..0x200000) == 0x5AA5`. We learned this AFTER a sequence of cal-research writes had already drifted the sum, then spent a productive afternoon trying to restore it via increasingly-large writes (64 KB → 8 KB → 1.97 MB). The restorations were byte-correct in our staging file. They were not all byte-correct in real flash.
+
+**`F6` is not a receipt.** Every one of 8064 `0xB6` blocks during the 2 MB restore returned `F6`. `0xB7` readback at the negotiated_start matched stock content. The commit still failed the sum check. The next cold boot found enough damage in regions we never verified to halt before CAN init. The FCU's staging buffer is what `0xB7` reads back; real flash is what the sum check (and the boot integrity check) reads. The two can disagree. Ours did.
+
+**Verification means crossing a power cycle.** The only decisive "did this write actually land?" check is SSM-A8 RMBA in default session AFTER a power cycle. `0xB7` staging-buffer readback is a fast iteration tool, not an integrity check. We shipped the write chain without the post-cycle verify and trusted the staging readback. Each individual decision was defensible; the combination was not.
+
+### Lessons baked into the architecture
+
+- **Tune-export pipeline preserves the sum.** SubuwuTuner's tune deployment must compute `u16 BE sum(0x6000..0x200000)` for the proposed write and, where necessary, include a compensating "balance" cell write so the post-write sum stays at `0x5AA5`. Locating the COBB-style balance cell is on the round-58 analyst punch list.
+
+- **`0xB7` is for iteration feedback, not verification.** Treat it as a debug echo of the FCU staging buffer. Verification = post-power-cycle SSM-A8 RMBA in default session.
+
+- **Protocol-level positive ≠ flash-level commit.** `F6` on a `0xB6` block, `77` on a `0x37`, `74` on a Phase D — none of those promise the bytes have crossed into real flash. The `31 01 02 02 01` commit, gated by the sum sentinel, is the only positive that means flash is durable.
+
+- **Boot integrity is the line in the sand.** Three signatures gate the application JMP. Tune-export pipeline must refuse any write plan that touches those addresses without an explicit override + matching restore plan. (Yes, COBB pre-flight does the same thing.)
+
+- **Bench testing is mandatory and benches are expendable.** ~$80 of inbound Renesas E2 Lite JTAG resurrects this rig from `bench-junkyard-stock.bin`. Cheaper than a single ECU control module from the dealer.
+
+Cost: one junkyard ECU + ~$80 of inbound JTAG. Bought: a clean-room model of the Subaru DIT flash protocol, the brick-protection-contract architecture for tune deployment, and the conviction not to trust an FCU staging buffer ever again.
+
+---
+
 ## Disclaimer
 
 SubuwuTuner is experimental software targeting hardware that can cost more than a used car to replace. If you flash an ECU, upset your tuner, light up every warning lamp on the dashboard, or accidentally turn a perfectly good engine controller into a very expensive paperweight, that's on you.
