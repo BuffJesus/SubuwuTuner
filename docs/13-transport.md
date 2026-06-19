@@ -119,8 +119,22 @@ public:
     virtual Status close() = 0;
 
     // Request/response with timeout. send_recv blocks up to `timeout` for
-    // a reply matching the implicit response context (e.g. a specific
-    // SSM responder address or UDS positive response).
+    // the FIRST reply frame matching the implicit response context (e.g. a
+    // specific SSM responder address or UDS positive response).
+    //
+    // ISO 14229 §7.5 NRC 0x78 (responsePending) contract — round-28 + 53:
+    // once the first frame arrives, if it's NRC 0x78 the implementation
+    // swallows intermediate 0x78s and waits for the final response. Each
+    // 0x78 effectively resets the P2*_Server_max deadline, capped at 30 s
+    // total. So the effective worst-case wait is `timeout + 30 s` for a
+    // chatty handler (e.g. 0x31 erase, large 0xB6 write).
+    //
+    // Picking `timeout`:
+    //   short queries (RDBI, DSC, 0x37 close):  3 s is fine
+    //   long ops (0xB6 256-byte, 0x31 erase):   10 s+ — otherwise the 3 s
+    //                                            verb-side wait pre-empts
+    //                                            the swallow loop on a
+    //                                            silent ECU (round-52 §4)
     virtual Result<Frame> send_recv(std::span<std::uint8_t const> payload,
                                     std::chrono::milliseconds      timeout) = 0;
 
