@@ -20217,6 +20217,7 @@ int cmd_subaru_flash_dump(int argc, char *argv[]) {
     std::uint32_t chunk_size = 0;   // auto-select per session
     std::string session = "extended";   // "extended" or "programming"
     std::string sa_variant = "fehr-active-l1";
+    std::string check_cid;
     int retries     = 3;
     int timeout_ms  = 1500;
     bool verbose    = false;
@@ -20231,7 +20232,10 @@ int cmd_subaru_flash_dump(int argc, char *argv[]) {
             }
             return argv[++i];
         };
-        if (a == "--transport") {
+        if (a == "--check-cid") {
+            if (auto const *v = require_arg("--check-cid"); v) check_cid = v;
+            else return 2;
+        } else if (a == "--transport") {
             if (auto const *v = require_arg("--transport"); v)
                 transport_kind = std::string{v};
             else return 2;
@@ -20309,6 +20313,7 @@ int cmd_subaru_flash_dump(int argc, char *argv[]) {
             "      [--start 0x000000] [--end 0x200000] \\\n"
             "      [--chunk <N>] [--session extended|programming] \\\n"
             "      [--sa-variant fehr-active-l1|none] \\\n"
+            "      [--check-cid <expected_cid>] \\\n"
             "      [--retries 3] [--timeout-ms 1500] [--verbose]\n"
             "\n"
             "Reads a contiguous flash range from the ECU via UDS 0x23 and\n"
@@ -20387,6 +20392,45 @@ int cmd_subaru_flash_dump(int argc, char *argv[]) {
     }
 
     st::ecu::uds::UdsClient uds{**t};
+
+    // Optional CID pre-flight per round-61 R8. DID 0xF19A returns
+    // the 8-byte Subaru CalID in default session — no DSC, no SA
+    // needed. Verify it matches --check-cid before doing anything
+    // that could affect the ECU; this catches "loaded the wrong base
+    // ROM" early.
+    if (!check_cid.empty()) {
+        std::fputs("[0/N] CID pre-flight (22 F1 9A)... ", stdout);
+        std::fflush(stdout);
+        std::array<std::uint8_t, 3> const req{0x22U, 0xF1U, 0x9AU};
+        auto resp = (*t)->send_recv(std::span<std::uint8_t const>{req},
+                                    std::chrono::milliseconds{1500});
+        if (!resp.has_value()) {
+            std::fprintf(stderr, "FAILED: %s\n",
+                         resp.error().to_string().c_str());
+            return 1;
+        }
+        auto const &body = resp->data;
+        if (body.size() < 4 || body[0] != 0x62U || body[1] != 0xF1U ||
+            body[2] != 0x9AU) {
+            std::fputs("FAILED: ECU did not echo 62 F1 9A.\n", stderr);
+            return 1;
+        }
+        std::string actual_cid(body.begin() + 3, body.end());
+        while (!actual_cid.empty() &&
+               (actual_cid.back() == '\0' ||
+                actual_cid.back() == ' '))
+            actual_cid.pop_back();
+        if (actual_cid != check_cid) {
+            std::fprintf(stderr,
+                "MISMATCH\n"
+                "      expected '%s', ECU reports '%s'.\n"
+                "      Aborting before any modification to avoid "
+                "writing the wrong base ROM to the wrong ECU.\n",
+                check_cid.c_str(), actual_cid.c_str());
+            return 1;
+        }
+        std::fprintf(stdout, "MATCH (%s).\n", actual_cid.c_str());
+    }
 
     // Step 1 — DSC 0x10 0x03 (Extended). Always needed; ALI 0x14
     // requires Extended at minimum (*0xFFF9AE86 == 7 per round-60
@@ -20894,6 +20938,395 @@ int cmd_subaru_live_log(int argc, char *argv[]) {
                  "subaru-live-log: wrote %llu samples × %zu signals to %s\n",
                  static_cast<unsigned long long>(samples_written),
                  signals.size(), output_path.c_str());
+    return 0;
+}
+
+// cmd_subaru_ecu_info — pre-flight identity card via UDS Mode 0x22.
+//
+// Round-61 R8 confirmed three identifier DIDs are dispatched in
+// default session (no DSC required):
+//   22 F1 90  → 62 F1 90 <17 ASCII bytes VIN>
+//   22 F1 9A  → 62 F1 9A <8 ASCII bytes CID, e.g. "LF79103P">
+//   22 F1 9F  → 62 F1 9F <16 bytes CVN — Calibration Verification Number>
+//
+// Mode 0x22 ReadDataByIdentifier is dispatch table slot 12 at
+// ROM 0x001F07E6 (per round-61 R5 agent's catalog at ROM 0x006180).
+//
+// This verb is the canonical pre-flight check: confirm we're
+// talking to the ECU we expect before any flash modification.
+// `subaru-flash-dump` will gain a --check-cid <expected> option
+// in a follow-on that wraps this same wire.
+int cmd_subaru_ecu_info(int argc, char *argv[]) {
+    std::optional<std::string> transport_kind;
+    std::string dll_path;
+    std::string device_path;
+    bool verbose = false;
+    bool json_out = false;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "subaru-ecu-info: %s requires a "
+                             "value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--transport") {
+            if (auto const *v = require_arg("--transport"); v)
+                transport_kind = std::string{v};
+            else return 2;
+        } else if (a == "--device") {
+            if (auto const *v = require_arg("--device"); v) device_path = v;
+            else return 2;
+        } else if (a == "--dll") {
+            if (auto const *v = require_arg("--dll"); v) dll_path = v;
+            else return 2;
+        } else if (a == "--verbose") {
+            verbose = true;
+        } else if (a == "--json") {
+            json_out = true;
+        } else {
+            std::fprintf(stderr, "subaru-ecu-info: unknown option: %s\n",
+                         argv[i]);
+            return 2;
+        }
+    }
+
+    if (!transport_kind.has_value()) {
+        std::fputs(
+            "subaru-ecu-info — pre-flight ECU identity card.\n"
+            "\n"
+            "Usage:\n"
+            "  subuwutuner-cli subaru-ecu-info --transport obdx --device COM4 \\\n"
+            "      [--json] [--verbose]\n"
+            "\n"
+            "Reads VIN (DID 0xF190), CID (DID 0xF19A), and CVN (DID 0xF19F)\n"
+            "from the ECU in default session — no DSC, no SecurityAccess.\n"
+            "Per round-61 R8 dispatch table catalog. Pre-flight check before\n"
+            "any flash modification: verify CID matches the loaded base ROM.\n",
+            stderr);
+        return 2;
+    }
+
+    auto const kind = st::transport::parse_kind(*transport_kind);
+    if (!kind.has_value()) {
+        std::fprintf(stderr,
+                     "subaru-ecu-info: --transport '%s' not recognized\n",
+                     transport_kind->c_str());
+        return 2;
+    }
+    st::transport::TransportSpec const spec{*kind, dll_path, device_path};
+    auto t = st::transport::open_transport(spec);
+    if (!t.has_value()) {
+        std::fprintf(stderr, "subaru-ecu-info: %s\n",
+                     t.error().to_string().c_str());
+        return 1;
+    }
+    if (verbose) st::transport::obdx::set_trace_enabled(true);
+    st::transport::LinkConfig const link{st::transport::LinkKind::CanIso15765,
+                                         500000, 0x000007E0, 0x000007E8};
+    if (auto s = (*t)->open(link); !s.has_value()) {
+        std::fprintf(stderr, "subaru-ecu-info: transport open: %s\n",
+                     s.error().to_string().c_str());
+        return 1;
+    }
+
+    auto read_did = [&](std::uint16_t did) -> std::optional<
+        std::vector<std::uint8_t>> {
+        std::array<std::uint8_t, 3> const req{
+            0x22U,
+            static_cast<std::uint8_t>((did >> 8) & 0xFFU),
+            static_cast<std::uint8_t>(did & 0xFFU)};
+        auto resp = (*t)->send_recv(std::span<std::uint8_t const>{req},
+                                    std::chrono::milliseconds{1500});
+        if (!resp.has_value()) return std::nullopt;
+        auto const &body = resp->data;
+        if (body.size() < 3) return std::nullopt;
+        if (body[0] != 0x62U) return std::nullopt;
+        std::uint16_t const echo =
+            static_cast<std::uint16_t>((body[1] << 8) | body[2]);
+        if (echo != did) return std::nullopt;
+        return std::vector<std::uint8_t>{body.begin() + 3, body.end()};
+    };
+
+    auto const vin = read_did(0xF190);
+    auto const cid = read_did(0xF19A);
+    auto const cvn = read_did(0xF19F);
+
+    auto print_ascii = [](std::vector<std::uint8_t> const &b) {
+        for (auto const c : b) {
+            if (c >= 0x20U && c <= 0x7EU) std::fputc(c, stdout);
+            else std::fputc('.', stdout);
+        }
+    };
+    auto print_hex = [](std::vector<std::uint8_t> const &b) {
+        for (auto const c : b) std::fprintf(stdout, "%02X", c);
+    };
+
+    if (json_out) {
+        std::fputs("{\n", stdout);
+        std::fputs("  \"schema\": \"subuwutuner.subaru-ecu-info.v1\",\n",
+                   stdout);
+        std::fputs("  \"vin\": ", stdout);
+        if (vin.has_value()) {
+            std::fputc('"', stdout); print_ascii(*vin); std::fputc('"', stdout);
+        } else {
+            std::fputs("null", stdout);
+        }
+        std::fputs(",\n  \"cid\": ", stdout);
+        if (cid.has_value()) {
+            std::fputc('"', stdout); print_ascii(*cid); std::fputc('"', stdout);
+        } else {
+            std::fputs("null", stdout);
+        }
+        std::fputs(",\n  \"cvn_hex\": ", stdout);
+        if (cvn.has_value()) {
+            std::fputc('"', stdout); print_hex(*cvn); std::fputc('"', stdout);
+        } else {
+            std::fputs("null", stdout);
+        }
+        std::fputs("\n}\n", stdout);
+    } else {
+        std::fputs("VIN: ", stdout);
+        if (vin.has_value()) print_ascii(*vin);
+        else std::fputs("(unavailable)", stdout);
+        std::fputc('\n', stdout);
+
+        std::fputs("CID: ", stdout);
+        if (cid.has_value()) print_ascii(*cid);
+        else std::fputs("(unavailable)", stdout);
+        std::fputc('\n', stdout);
+
+        std::fputs("CVN: ", stdout);
+        if (cvn.has_value()) print_hex(*cvn);
+        else std::fputs("(unavailable)", stdout);
+        std::fputc('\n', stdout);
+    }
+
+    return (vin.has_value() && cid.has_value() && cvn.has_value()) ? 0 : 1;
+}
+
+// cmd_subaru_passive_log — passive CAN listen-only datalogger.
+//
+// Round-61 R7 found the CAN broadcast TX-task table at ROM 0x1F7734
+// (~23 IDs, 8-byte records). The ECU emits these frames periodically
+// on the OBD bus regardless of any tester being attached, so we can
+// log a high-rate signal subset without any UDS overhead — works on
+// a moving vehicle, zero protocol intrusion.
+//
+// This is a thin wrapper around the existing `sniff` verb's listen-
+// only mode, with two additions: (a) a small built-in filter set
+// targeting round-61 R7's high-value broadcast IDs by default, and
+// (b) CSV emission with one column per filtered ID + a timestamp.
+//
+// Round-62+ will decode the per-ID byte layout into signal columns
+// (RPM, throttle, MAP, etc.) once the analyst maps them. For now
+// each filtered frame's full payload is dumped hex so the captured
+// log is post-hoc analyzable by a script with knowledge of the
+// per-byte layout.
+int cmd_subaru_passive_log(int argc, char *argv[]) {
+    std::optional<std::string> transport_kind;
+    std::string dll_path;
+    std::string device_path;
+    std::string output_path;
+    int duration_sec = 60;
+    std::vector<std::uint32_t> filter_ids;
+    bool verbose = false;
+
+    // Round-61 R7 default high-value broadcast IDs.
+    auto const apply_default_filters = [&]() {
+        if (filter_ids.empty()) {
+            filter_ids = {0x140U, 0x141U, 0x142U, 0x148U, 0x149U,
+                          0x161U, 0x188U, 0x282U, 0x360U, 0x361U,
+                          0x368U, 0x370U};
+        }
+    };
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "subaru-passive-log: %s requires a "
+                             "value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--transport") {
+            if (auto const *v = require_arg("--transport"); v)
+                transport_kind = std::string{v};
+            else return 2;
+        } else if (a == "--device") {
+            if (auto const *v = require_arg("--device"); v) device_path = v;
+            else return 2;
+        } else if (a == "--dll") {
+            if (auto const *v = require_arg("--dll"); v) dll_path = v;
+            else return 2;
+        } else if (a == "--output") {
+            if (auto const *v = require_arg("--output"); v) output_path = v;
+            else return 2;
+        } else if (a == "--duration-sec") {
+            if (auto const *v = require_arg("--duration-sec"); v) {
+                try { duration_sec = std::stoi(v); }
+                catch (std::exception const &) { return 2; }
+                if (duration_sec < 1) return 2;
+            } else return 2;
+        } else if (a == "--ids") {
+            auto const *v = require_arg("--ids");
+            if (v == nullptr) return 2;
+            std::string s{v};
+            std::size_t pos = 0;
+            filter_ids.clear();
+            while (pos < s.size()) {
+                auto const comma = s.find(',', pos);
+                std::string tok = s.substr(pos,
+                    comma == std::string::npos ? std::string::npos
+                                                : comma - pos);
+                if (!tok.empty()) {
+                    try {
+                        filter_ids.push_back(static_cast<std::uint32_t>(
+                            std::stoul(tok, nullptr, 0)));
+                    } catch (std::exception const &) {
+                        std::fprintf(stderr,
+                                     "subaru-passive-log: --ids bad "
+                                     "'%s'\n", tok.c_str());
+                        return 2;
+                    }
+                }
+                if (comma == std::string::npos) break;
+                pos = comma + 1;
+            }
+        } else if (a == "--verbose") {
+            verbose = true;
+        } else {
+            std::fprintf(stderr, "subaru-passive-log: unknown option: %s\n",
+                         argv[i]);
+            return 2;
+        }
+    }
+
+    if (!transport_kind.has_value() || output_path.empty()) {
+        std::fputs(
+            "subaru-passive-log — passive CAN listen-only datalogger.\n"
+            "\n"
+            "Usage:\n"
+            "  subuwutuner-cli subaru-passive-log --transport obdx --device COM4 \\\n"
+            "      --output <FILE.csv> [--duration-sec 60] \\\n"
+            "      [--ids 0x140,0x282,0x360,...] [--verbose]\n"
+            "\n"
+            "Listens to broadcast CAN frames on the OBD-II bus and writes\n"
+            "one CSV row per captured frame matching the filter set. Default\n"
+            "filter is the round-61 R7 high-value broadcast set:\n"
+            "  0x140 (RPM/throttle/gear/vehicle-speed, ~50ms period)\n"
+            "  0x141/0x142 (engine load, IAT)\n"
+            "  0x148/0x149 (transmission state)\n"
+            "  0x161 (ABS wheel speeds)\n"
+            "  0x188 (yaw/G)\n"
+            "  0x282 (coolant/oil/trans temps, ~10ms period)\n"
+            "  0x360 (torque request)\n"
+            "  0x361 (steering)\n"
+            "  0x368 (HVAC)\n"
+            "  0x370 (power steering pressure)\n"
+            "\n"
+            "Output CSV schema:\n"
+            "  timestamp_ms,can_id,payload_hex\n"
+            "\n"
+            "Round-62+ will decode per-ID payloads into named signal columns\n"
+            "(RPM, throttle, MAP, etc.) once the byte-layout maps land. For\n"
+            "now the hex payload column lets a downstream script decode any\n"
+            "subset post-hoc.\n",
+            stderr);
+        return 2;
+    }
+    apply_default_filters();
+
+    auto const kind = st::transport::parse_kind(*transport_kind);
+    if (!kind.has_value()) {
+        std::fprintf(stderr,
+                     "subaru-passive-log: --transport '%s' not recognized\n",
+                     transport_kind->c_str());
+        return 2;
+    }
+    st::transport::TransportSpec const spec{*kind, dll_path, device_path};
+    auto t = st::transport::open_transport(spec);
+    if (!t.has_value()) {
+        std::fprintf(stderr, "subaru-passive-log: %s\n",
+                     t.error().to_string().c_str());
+        return 1;
+    }
+    if (verbose) st::transport::obdx::set_trace_enabled(true);
+    st::transport::LinkConfig link;
+    link.kind          = st::transport::LinkKind::CanIso15765;
+    link.baud          = 500000;
+    link.listen_only   = true;
+    if (auto s = (*t)->open(link); !s.has_value()) {
+        std::fprintf(stderr,
+                     "subaru-passive-log: transport open (listen-only): "
+                     "%s\n",
+                     s.error().to_string().c_str());
+        return 1;
+    }
+
+    std::FILE *fp = std::fopen(output_path.c_str(), "wb");
+    if (fp == nullptr) {
+        std::fprintf(stderr,
+                     "subaru-passive-log: cannot open --output '%s'\n",
+                     output_path.c_str());
+        return 1;
+    }
+    std::fputs("timestamp_ms,can_id,payload_hex\n", fp);
+
+    auto const filter_match = [&](std::uint32_t id) {
+        for (auto const f : filter_ids)
+            if (f == id) return true;
+        return false;
+    };
+
+    std::uint64_t frames_kept = 0;
+    auto const t0 = std::chrono::steady_clock::now();
+    auto callback = [&](st::transport::Frame const &f) {
+        // For CanRaw mode the frame data carries `[CAN_ID 4-byte LE/BE][payload]`
+        // — actual layout depends on the transport. Pragmatic decode:
+        // first 2-4 bytes are the ID, remainder is the payload. We
+        // assume the OBDX path follows the same wire shape it uses
+        // for ISO-TP RX (`[CAN_ID BE u32 prefix][app bytes]`).
+        if (f.data.size() < 4) return;
+        std::uint32_t const id =
+            (static_cast<std::uint32_t>(f.data[0]) << 24) |
+            (static_cast<std::uint32_t>(f.data[1]) << 16) |
+            (static_cast<std::uint32_t>(f.data[2]) << 8) |
+            static_cast<std::uint32_t>(f.data[3]);
+        if (!filter_match(id)) return;
+        auto const elapsed_ms = std::chrono::duration_cast<
+            std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - t0).count();
+        std::fprintf(fp, "%lld,0x%X,", static_cast<long long>(elapsed_ms),
+                     id);
+        for (std::size_t i = 4; i < f.data.size(); ++i)
+            std::fprintf(fp, "%02X", f.data[i]);
+        std::fputc('\n', fp);
+        ++frames_kept;
+    };
+
+    if (auto s = (*t)->start_streaming(callback); !s.has_value()) {
+        std::fprintf(stderr,
+                     "subaru-passive-log: start_streaming: %s\n",
+                     s.error().to_string().c_str());
+        std::fclose(fp);
+        return 1;
+    }
+    std::this_thread::sleep_for(std::chrono::seconds{duration_sec});
+    (void)(*t)->stop_streaming();
+    std::fclose(fp);
+
+    std::fprintf(stdout,
+                 "subaru-passive-log: kept %llu frames over %d s "
+                 "(%zu filter IDs) → %s\n",
+                 static_cast<unsigned long long>(frames_kept),
+                 duration_sec, filter_ids.size(),
+                 output_path.c_str());
     return 0;
 }
 
@@ -28800,6 +29233,12 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "subaru-live-log") {
         return cmd_subaru_live_log(argc - 2, argv + 2);
+    }
+    if (cmd == "subaru-ecu-info") {
+        return cmd_subaru_ecu_info(argc - 2, argv + 2);
+    }
+    if (cmd == "subaru-passive-log") {
+        return cmd_subaru_passive_log(argc - 2, argv + 2);
     }
     if (cmd == "subaru-mode1-probe") {
         return cmd_subaru_mode1_probe(argc - 2, argv + 2);
