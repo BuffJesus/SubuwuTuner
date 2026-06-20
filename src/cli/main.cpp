@@ -21550,6 +21550,94 @@ int cmd_subaru_live_tune(int argc, char *argv[]) {
     bool read_back = false;
     bool verbose = false;
     bool no_dsc  = false;
+    // Round-63 R15 catalog-driven mode. CSV at
+    // findings/staging/round-63/wdbi-422-did-catalog.csv has
+    // 422 entries; loader is a tiny positional-CSV parser.
+    std::string catalog_path;
+    std::string cell_query;
+    std::optional<std::uint32_t> read_addr;
+    bool list_tunable = false;
+    std::optional<std::uint16_t> list_class;
+    std::optional<std::uint8_t>  expected_size;
+    bool expect_ram = false;
+
+    struct CatEntry {
+        std::uint16_t did{0};
+        std::uint16_t did_class{0};
+        std::uint8_t  size{0};
+        std::uint32_t target_addr{0};
+        std::string region;
+        std::string signal_name;
+        std::string signal_unit;
+        std::string signal_scaling;
+    };
+    std::vector<CatEntry> catalog;
+
+    auto load_catalog =
+        [&](std::string const &path) -> bool {
+        std::FILE *fp = std::fopen(path.c_str(), "rb");
+        if (fp == nullptr) return false;
+        catalog.clear();
+        char buf[1024];
+        bool header_skipped = false;
+        while (std::fgets(buf, sizeof(buf), fp) != nullptr) {
+            if (!header_skipped) { header_skipped = true; continue; }
+            std::string line{buf};
+            while (!line.empty() &&
+                   (line.back() == '\n' || line.back() == '\r'))
+                line.pop_back();
+            if (line.empty()) continue;
+            std::vector<std::string> fields;
+            std::size_t pos = 0;
+            for (;;) {
+                auto const comma = line.find(',', pos);
+                if (comma == std::string::npos) {
+                    fields.push_back(line.substr(pos));
+                    break;
+                }
+                fields.push_back(line.substr(pos, comma - pos));
+                pos = comma + 1;
+            }
+            if (fields.size() < 5) continue;
+            CatEntry e;
+            try {
+                e.did = static_cast<std::uint16_t>(
+                    std::stoul(fields[0], nullptr, 16));
+                e.did_class = static_cast<std::uint16_t>(
+                    std::stoul(fields[1], nullptr, 16));
+                e.size = static_cast<std::uint8_t>(
+                    std::stoul(fields[2], nullptr, 10));
+                e.target_addr = static_cast<std::uint32_t>(
+                    std::stoul(fields[3], nullptr, 16));
+            } catch (std::exception const &) {
+                continue;
+            }
+            e.region = fields[4];
+            if (fields.size() > 5) e.signal_name     = fields[5];
+            if (fields.size() > 6) e.signal_unit     = fields[6];
+            if (fields.size() > 7) e.signal_scaling  = fields[7];
+            catalog.push_back(std::move(e));
+        }
+        std::fclose(fp);
+        return true;
+    };
+
+    auto ci_contains = [](std::string_view hay,
+                          std::string_view needle) -> bool {
+        if (needle.size() > hay.size()) return false;
+        for (std::size_t i = 0; i + needle.size() <= hay.size(); ++i) {
+            bool ok = true;
+            for (std::size_t j = 0; j < needle.size(); ++j) {
+                char a = hay[i + j];
+                char b = needle[j];
+                if (a >= 'A' && a <= 'Z') a = static_cast<char>(a + 32);
+                if (b >= 'A' && b <= 'Z') b = static_cast<char>(b + 32);
+                if (a != b) { ok = false; break; }
+            }
+            if (ok) return true;
+        }
+        return false;
+    };
 
     auto const parse_hex_bytes = [&](std::string_view s,
                                      std::vector<std::uint8_t> &out) -> bool {
@@ -21619,6 +21707,38 @@ int cmd_subaru_live_tune(int argc, char *argv[]) {
             no_dsc = true;
         } else if (a == "--verbose") {
             verbose = true;
+        } else if (a == "--catalog") {
+            if (auto const *v = require_arg("--catalog"); v) catalog_path = v;
+            else return 2;
+        } else if (a == "--cell") {
+            if (auto const *v = require_arg("--cell"); v) cell_query = v;
+            else return 2;
+        } else if (a == "--read-addr") {
+            auto const *v = require_arg("--read-addr");
+            if (v == nullptr) return 2;
+            try {
+                read_addr = static_cast<std::uint32_t>(
+                    std::stoul(v, nullptr, 16));
+            } catch (std::exception const &) {
+                std::fprintf(stderr,
+                             "subaru-live-tune: --read-addr '%s' bad "
+                             "hex\n", v);
+                return 2;
+            }
+        } else if (a == "--list-tunable") {
+            list_tunable = true;
+        } else if (a == "--list-class") {
+            auto const *v = require_arg("--list-class");
+            if (v == nullptr) return 2;
+            try {
+                list_class = static_cast<std::uint16_t>(
+                    std::stoul(v, nullptr, 16));
+            } catch (std::exception const &) {
+                std::fprintf(stderr,
+                             "subaru-live-tune: --list-class '%s' bad "
+                             "hex\n", v);
+                return 2;
+            }
         } else {
             std::fprintf(stderr, "subaru-live-tune: unknown option: %s\n",
                          argv[i]);
@@ -21626,15 +21746,141 @@ int cmd_subaru_live_tune(int argc, char *argv[]) {
         }
     }
 
+    // Load catalog if --catalog was provided. Required for --cell,
+    // --read-addr, --list-tunable, --list-class.
+    if (!catalog_path.empty()) {
+        if (!load_catalog(catalog_path)) {
+            std::fprintf(stderr,
+                         "subaru-live-tune: cannot read --catalog '%s'\n",
+                         catalog_path.c_str());
+            return 1;
+        }
+        if (verbose) {
+            std::fprintf(stdout,
+                         "subaru-live-tune: loaded %zu catalog entries "
+                         "from %s\n", catalog.size(),
+                         catalog_path.c_str());
+        }
+    }
+
+    // --list-tunable / --list-class are pure introspection; no
+    // transport needed.
+    if (list_tunable || list_class.has_value()) {
+        if (catalog.empty()) {
+            std::fputs("subaru-live-tune: --list-* requires --catalog\n",
+                       stderr);
+            return 2;
+        }
+        std::fprintf(stdout,
+                     "DID    cls    sz  target      region  signal\n");
+        for (auto const &e : catalog) {
+            if (list_class.has_value() && e.did_class != *list_class)
+                continue;
+            if (list_tunable &&
+                (e.region != "RAM" || e.signal_name.empty()))
+                continue;
+            std::fprintf(stdout,
+                         "0x%04X 0x%04X %3u 0x%08X %-6s  %s",
+                         e.did, e.did_class, e.size, e.target_addr,
+                         e.region.c_str(), e.signal_name.c_str());
+            if (!e.signal_scaling.empty())
+                std::fprintf(stdout, "  [%s]", e.signal_scaling.c_str());
+            std::fputc('\n', stdout);
+        }
+        return 0;
+    }
+
+    // --cell / --read-addr resolve to a DID via the catalog.
+    if (!cell_query.empty()) {
+        if (catalog.empty()) {
+            std::fputs("subaru-live-tune: --cell requires --catalog\n",
+                       stderr);
+            return 2;
+        }
+        std::vector<CatEntry const *> matches;
+        for (auto const &e : catalog) {
+            if (e.region != "RAM") continue;
+            if (e.signal_name.empty()) continue;
+            if (ci_contains(e.signal_name, cell_query))
+                matches.push_back(&e);
+        }
+        if (matches.empty()) {
+            std::fprintf(stderr,
+                         "subaru-live-tune: --cell '%s' matched 0 RAM-"
+                         "writable entries\n", cell_query.c_str());
+            return 1;
+        }
+        if (matches.size() > 1) {
+            std::fprintf(stderr,
+                         "subaru-live-tune: --cell '%s' matched %zu "
+                         "entries — narrow further:\n",
+                         cell_query.c_str(), matches.size());
+            for (auto const *e : matches)
+                std::fprintf(stderr, "  0x%04X  %s\n",
+                             e->did, e->signal_name.c_str());
+            return 1;
+        }
+        auto const &m = *matches[0];
+        did = m.did;
+        expected_size = m.size;
+        expect_ram = (m.region == "RAM");
+        std::fprintf(stdout,
+                     "subaru-live-tune: --cell '%s' → DID 0x%04X "
+                     "(size %u, addr 0x%08X, scaling [%s])\n",
+                     cell_query.c_str(), m.did, m.size,
+                     m.target_addr, m.signal_scaling.c_str());
+    }
+    if (read_addr.has_value()) {
+        if (catalog.empty()) {
+            std::fputs("subaru-live-tune: --read-addr requires --catalog\n",
+                       stderr);
+            return 2;
+        }
+        CatEntry const *found = nullptr;
+        for (auto const &e : catalog) {
+            if (e.target_addr == *read_addr) { found = &e; break; }
+        }
+        if (found == nullptr) {
+            std::fprintf(stderr,
+                         "subaru-live-tune: --read-addr 0x%08X — no "
+                         "catalog entry has this target\n", *read_addr);
+            return 1;
+        }
+        did = found->did;
+        expected_size = found->size;
+        expect_ram = (found->region == "RAM");
+        std::fprintf(stdout,
+                     "subaru-live-tune: --read-addr 0x%08X → DID 0x%04X "
+                     "(size %u, region %s)\n", *read_addr, found->did,
+                     found->size, found->region.c_str());
+    }
+
     if (!transport_kind.has_value() || !did.has_value() ||
         (write_bytes.empty() && !read_back)) {
         std::fputs(
             "subaru-live-tune — live RAM write via UDS 0x2E WDBI.\n"
             "\n"
-            "Usage:\n"
+            "Usage (catalog-driven, recommended):\n"
+            "  subuwutuner-cli subaru-live-tune --transport obdx --device COM4 \\\n"
+            "      --catalog <FILE.csv> \\\n"
+            "      (--cell <name_substring> | --read-addr <hex>) \\\n"
+            "      (--write <hex_bytes> | --read) \\\n"
+            "      [--no-dsc] [--verbose]\n"
+            "\n"
+            "Usage (raw DID):\n"
             "  subuwutuner-cli subaru-live-tune --transport obdx --device COM4 \\\n"
             "      --did <hex> (--write <hex_bytes> | --read) \\\n"
             "      [--no-dsc] [--verbose]\n"
+            "\n"
+            "Catalog introspection (no transport needed):\n"
+            "  --list-tunable                     show all RAM-writable named entries\n"
+            "  --list-class <hex>                 show all entries in a DID class\n"
+            "\n"
+            "Round-63 R15 shipped the 422-DID WDBI catalog CSV at\n"
+            "`findings/staging/round-63/wdbi-422-did-catalog.csv` (off-tree\n"
+            "per Path B distribution policy). 275 RAM-writable cells + 23\n"
+            "cross-referenced with the read-on-demand signal catalog.\n"
+            "Pass that CSV via --catalog to enable symbolic lookups.\n"
             "\n"
             "Round-62 R10 unlocked the live-tuning write primitive:\n"
             "  SID 0x2E (WDBI) targets one of 422 pre-curated DID slots\n"
@@ -21710,6 +21956,23 @@ int cmd_subaru_live_tune(int argc, char *argv[]) {
     };
 
     if (!write_bytes.empty()) {
+        // Catalog-driven size + region sanity (only fires if --cell
+        // or --read-addr resolved the DID).
+        if (expected_size.has_value() &&
+            write_bytes.size() != *expected_size) {
+            std::fprintf(stderr,
+                         "subaru-live-tune: catalog entry expects %u-byte "
+                         "write, got %zu bytes — refusing.\n",
+                         *expected_size, write_bytes.size());
+            return 2;
+        }
+        if (expect_ram == false && !cell_query.empty()) {
+            // We only set expect_ram=true when region was RAM; a
+            // non-RAM entry under --cell shouldn't be writable.
+            std::fputs("subaru-live-tune: catalog entry is not in RAM — "
+                       "WDBI write refused.\n", stderr);
+            return 2;
+        }
         std::vector<std::uint8_t> req;
         req.reserve(3 + write_bytes.size());
         req.push_back(0x2EU);
