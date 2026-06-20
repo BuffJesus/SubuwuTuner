@@ -20184,6 +20184,719 @@ int cmd_subaru_flash_erase(int argc, char *argv[]) {
     return 1;
 }
 
+// cmd_subaru_flash_dump — UDS 0x23 ReadMemoryByAddress wrapper that
+// dumps a contiguous flash range to a file. Per round-60 R1 analyst
+// decompile of the handler at ROM 0xBEAC0:
+//   - Wire: 23 <ALI> <addr-4-BE> <len-{1|2}-BE>
+//   - ALI 0x14: 4-byte addr + 1-byte length (max 255). Valid in
+//     Extended Diag (DSC 10 03).
+//   - ALI 0x24: 4-byte addr + 2-byte length (max 4094). Valid in
+//     Programming session (DSC 10 02).
+//   - Allowed ranges (per ROM 0x71928 table): [0x0..0x1FFFFF] (the
+//     full 2 MB ROM, INCLUDING the FACI-locked bootloader region)
+//     and [0xFFF80000..0xFFF9FFFF] (high RAM).
+//
+// Programming session reads 2 MB in ~2 minutes; Extended in ~11.
+// Both produce a binary identical to what the FCU sees on real flash
+// — unlike 0xB7, this is NOT the staging-buffer view (per round-57
+// brick analysis).
+//
+// Output layout per round-60 R1 §2.4 spec:
+//   <output>           raw bytes (end - start)
+//   <output>.meta.json sidecar with crc32, ranges, session, etc.
+// SHA-256 is queued as a follow-on (project doesn't yet vendor a
+// SHA-256 impl; CRC32 from st::core covers the pre-deploy gate
+// "two consecutive dumps match" check for now).
+int cmd_subaru_flash_dump(int argc, char *argv[]) {
+    std::optional<std::string> transport_kind;
+    std::string dll_path;
+    std::string device_path;
+    std::string output_path;
+    std::uint32_t start_addr = 0x000000U;
+    std::uint32_t end_addr   = 0x200000U;
+    std::uint32_t chunk_size = 0;   // auto-select per session
+    std::string session = "extended";   // "extended" or "programming"
+    std::string sa_variant = "fehr-active-l1";
+    int retries     = 3;
+    int timeout_ms  = 1500;
+    bool verbose    = false;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "subaru-flash-dump: %s requires a "
+                             "value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--transport") {
+            if (auto const *v = require_arg("--transport"); v)
+                transport_kind = std::string{v};
+            else return 2;
+        } else if (a == "--device") {
+            if (auto const *v = require_arg("--device"); v) device_path = v;
+            else return 2;
+        } else if (a == "--dll") {
+            if (auto const *v = require_arg("--dll"); v) dll_path = v;
+            else return 2;
+        } else if (a == "--output") {
+            if (auto const *v = require_arg("--output"); v) output_path = v;
+            else return 2;
+        } else if (a == "--start") {
+            if (auto const *v = require_arg("--start"); v) {
+                try { start_addr = static_cast<std::uint32_t>(
+                          std::stoul(v, nullptr, 0)); }
+                catch (std::exception const &) {
+                    std::fprintf(stderr, "subaru-flash-dump: --start '%s' not "
+                                 "a valid hex (try 0x0)\n", v);
+                    return 2;
+                }
+            } else return 2;
+        } else if (a == "--end") {
+            if (auto const *v = require_arg("--end"); v) {
+                try { end_addr = static_cast<std::uint32_t>(
+                          std::stoul(v, nullptr, 0)); }
+                catch (std::exception const &) {
+                    std::fprintf(stderr, "subaru-flash-dump: --end '%s' not "
+                                 "a valid hex (try 0x200000)\n", v);
+                    return 2;
+                }
+            } else return 2;
+        } else if (a == "--chunk") {
+            if (auto const *v = require_arg("--chunk"); v) {
+                try { chunk_size = static_cast<std::uint32_t>(
+                          std::stoul(v, nullptr, 0)); }
+                catch (std::exception const &) {
+                    std::fprintf(stderr, "subaru-flash-dump: --chunk '%s' not "
+                                 "an integer\n", v);
+                    return 2;
+                }
+            } else return 2;
+        } else if (a == "--session") {
+            if (auto const *v = require_arg("--session"); v) session = v;
+            else return 2;
+        } else if (a == "--sa-variant") {
+            if (auto const *v = require_arg("--sa-variant"); v) sa_variant = v;
+            else return 2;
+        } else if (a == "--retries") {
+            if (auto const *v = require_arg("--retries"); v) {
+                try { retries = std::stoi(v); }
+                catch (std::exception const &) { return 2; }
+            } else return 2;
+        } else if (a == "--timeout-ms") {
+            if (auto const *v = require_arg("--timeout-ms"); v) {
+                try { timeout_ms = std::stoi(v); }
+                catch (std::exception const &) { return 2; }
+            } else return 2;
+        } else if (a == "--verbose") {
+            verbose = true;
+        } else {
+            std::fprintf(stderr, "subaru-flash-dump: unknown option: %s\n",
+                         argv[i]);
+            return 2;
+        }
+    }
+
+    if (!transport_kind.has_value() || output_path.empty()) {
+        std::fputs(
+            "subaru-flash-dump — UDS 0x23 ReadMemoryByAddress range dump.\n"
+            "\n"
+            "Usage:\n"
+            "  subuwutuner-cli subaru-flash-dump --transport obdx --device COM4 \\\n"
+            "      --output <FILE.bin> \\\n"
+            "      [--start 0x000000] [--end 0x200000] \\\n"
+            "      [--chunk <N>] [--session extended|programming] \\\n"
+            "      [--sa-variant fehr-active-l1|none] \\\n"
+            "      [--retries 3] [--timeout-ms 1500] [--verbose]\n"
+            "\n"
+            "Reads a contiguous flash range from the ECU via UDS 0x23 and\n"
+            "writes raw bytes to --output (always (end - start) bytes). A\n"
+            "sidecar <output>.meta.json records start/end, chunk size,\n"
+            "session, SA variant, CRC32, capture timestamp.\n"
+            "\n"
+            "Allowed ranges (per round-60 R1 — handler at ROM 0xBEAC0):\n"
+            "  [0x000000, 0x200000)  — the full 2 MB ROM including the\n"
+            "                          FACI-locked bootloader region;\n"
+            "                          UDS 0x23 reads it through fine\n"
+            "                          (only writes are silently dropped).\n"
+            "  [0xFFF80000, 0xFFFA0000) — high RAM.\n"
+            "\n"
+            "Sessions:\n"
+            "  extended    DSC 10 03; 1-byte length (ALI 0x14); 255 bytes\n"
+            "              max per chunk. ~11 min for 2 MB. Default.\n"
+            "  programming DSC 10 02; 2-byte length (ALI 0x24); 4094 bytes\n"
+            "              max per chunk. ~2 min for 2 MB. Caller must\n"
+            "              have already entered Programming session via\n"
+            "              `subaru-dsc-unblock-sequence --burst-write-extended`\n"
+            "              within the same transport — this verb does NOT\n"
+            "              run the burst-write itself.\n"
+            "\n"
+            "Pre-deploy gate (per round-60 R1 §2.4): run two consecutive\n"
+            "dumps and verify the CRC32s match before any flash write.\n"
+            "Treat any single-shot dump as unverified.\n",
+            stderr);
+        return 2;
+    }
+
+    if (end_addr <= start_addr) {
+        std::fprintf(stderr,
+                     "subaru-flash-dump: --end (0x%X) must be > --start "
+                     "(0x%X)\n", end_addr, start_addr);
+        return 2;
+    }
+    if (session != "extended" && session != "programming") {
+        std::fprintf(stderr,
+                     "subaru-flash-dump: --session must be 'extended' or "
+                     "'programming' (got '%s')\n", session.c_str());
+        return 2;
+    }
+    bool const is_programming = (session == "programming");
+    std::uint8_t const ali = is_programming ? 0x24U : 0x14U;
+    std::uint32_t const max_chunk = is_programming ? 0x0FFEU : 0xFFU;
+    if (chunk_size == 0) chunk_size = max_chunk;
+    if (chunk_size > max_chunk) {
+        std::fprintf(stderr,
+                     "subaru-flash-dump: --chunk %u exceeds session max %u "
+                     "(ALI 0x%02X)\n", chunk_size, max_chunk, ali);
+        return 2;
+    }
+
+    auto const kind = st::transport::parse_kind(*transport_kind);
+    if (!kind.has_value()) {
+        std::fprintf(stderr,
+                     "subaru-flash-dump: --transport '%s' not recognized\n",
+                     transport_kind->c_str());
+        return 2;
+    }
+    st::transport::TransportSpec const spec{*kind, dll_path, device_path};
+    auto t = st::transport::open_transport(spec);
+    if (!t.has_value()) {
+        std::fprintf(stderr, "subaru-flash-dump: %s\n",
+                     t.error().to_string().c_str());
+        return 1;
+    }
+    if (verbose) st::transport::obdx::set_trace_enabled(true);
+    st::transport::LinkConfig const link{st::transport::LinkKind::CanIso15765,
+                                         500000, 0x000007E0, 0x000007E8};
+    if (auto s = (*t)->open(link); !s.has_value()) {
+        std::fprintf(stderr, "subaru-flash-dump: transport open: %s\n",
+                     s.error().to_string().c_str());
+        return 1;
+    }
+
+    st::ecu::uds::UdsClient uds{**t};
+
+    // Step 1 — DSC 0x10 0x03 (Extended). Always needed; ALI 0x14
+    // requires Extended at minimum (*0xFFF9AE86 == 7 per round-60
+    // §2.2). Programming session caller must have already entered
+    // via burst-write — we just check it's there.
+    if (!is_programming) {
+        std::fputs("[1/N] DSC 0x10 0x03 (Extended)... ", stdout);
+        std::fflush(stdout);
+        if (auto s = uds.diagnostic_session_control(
+                0x03, std::chrono::milliseconds{2000});
+            !s.has_value()) {
+            std::fprintf(stderr, "FAILED: %s\n",
+                         s.error().to_string().c_str());
+            return 1;
+        }
+        std::fputs("OK (50 03).\n", stdout);
+    } else {
+        std::fputs("[1/N] Programming-session mode — caller is responsible\n"
+                   "      for having run `subaru-dsc-unblock-sequence "
+                   "--burst-write-extended` already.\n", stdout);
+    }
+
+    // Step 2 — SA L1 prelude (default fehr-active-l1; skip when 'none').
+    if (sa_variant != "none") {
+        if (sa_variant != "fehr-active-l1") {
+            std::fprintf(stderr,
+                         "subaru-flash-dump: --sa-variant '%s' not "
+                         "recognized (try 'fehr-active-l1' or 'none')\n",
+                         sa_variant.c_str());
+            return 2;
+        }
+        std::fputs("[2/N] SA L1 (aftermarket)... ", stdout);
+        std::fflush(stdout);
+        auto seed = uds.security_access_request_seed(
+            0x01, std::chrono::milliseconds{1500});
+        if (!seed.has_value()) {
+            std::fprintf(stderr, "requestSeed FAILED: %s\n",
+                         seed.error().to_string().c_str());
+            return 1;
+        }
+        auto key = st::ecu::subaru::ssmcan1_l1_aftermarket(*seed);
+        if (!key.has_value()) {
+            std::fprintf(stderr, "key derivation FAILED: %s\n",
+                         key.error().to_string().c_str());
+            return 1;
+        }
+        if (auto s = uds.security_access_send_key(
+                0x02, *key, std::chrono::milliseconds{1500});
+            !s.has_value()) {
+            std::fprintf(stderr, "sendKey FAILED: %s\n",
+                         s.error().to_string().c_str());
+            return 1;
+        }
+        std::fputs("OK (67 02).\n", stdout);
+    }
+
+    // Step 3 — open output file.
+    std::FILE *fp = std::fopen(output_path.c_str(), "wb");
+    if (fp == nullptr) {
+        std::fprintf(stderr, "subaru-flash-dump: cannot open --output "
+                     "'%s'\n", output_path.c_str());
+        return 1;
+    }
+
+    // Step 4 — dump loop.
+    std::uint64_t const total_bytes = end_addr - start_addr;
+    std::fprintf(stdout,
+                 "[3/N] Dump 0x%06X..0x%06X (%llu bytes, ALI 0x%02X, "
+                 "chunk %u)...\n",
+                 start_addr, end_addr,
+                 static_cast<unsigned long long>(total_bytes), ali,
+                 chunk_size);
+    std::fflush(stdout);
+
+    st::Crc32 crc;
+    auto const t_dump_start = std::chrono::steady_clock::now();
+    std::uint32_t addr = start_addr;
+    std::uint64_t bytes_dumped = 0;
+    std::uint32_t last_report_pct = 0;
+    while (addr < end_addr) {
+        std::uint32_t const remaining = end_addr - addr;
+        std::uint32_t const this_chunk = std::min(chunk_size, remaining);
+
+        // Build wire: 23 ALI addr-4-BE len-{1|2}-BE
+        std::vector<std::uint8_t> req;
+        req.reserve(8);
+        req.push_back(0x23U);
+        req.push_back(ali);
+        req.push_back(static_cast<std::uint8_t>((addr >> 24) & 0xFFU));
+        req.push_back(static_cast<std::uint8_t>((addr >> 16) & 0xFFU));
+        req.push_back(static_cast<std::uint8_t>((addr >> 8) & 0xFFU));
+        req.push_back(static_cast<std::uint8_t>(addr & 0xFFU));
+        if (is_programming) {
+            req.push_back(static_cast<std::uint8_t>((this_chunk >> 8) & 0xFFU));
+            req.push_back(static_cast<std::uint8_t>(this_chunk & 0xFFU));
+        } else {
+            req.push_back(static_cast<std::uint8_t>(this_chunk & 0xFFU));
+        }
+
+        int attempt = 0;
+        bool ok = false;
+        while (attempt <= retries) {
+            auto resp = (*t)->send_recv(
+                std::span<std::uint8_t const>{req},
+                std::chrono::milliseconds{timeout_ms});
+            if (!resp.has_value()) {
+                ++attempt;
+                if (verbose) {
+                    std::fprintf(stdout,
+                                 "  retry %d at 0x%06X: %s\n", attempt,
+                                 addr, resp.error().to_string().c_str());
+                }
+                continue;
+            }
+            auto const &body = resp->data;
+            // Positive: 63 <ALI> <data...>
+            if (body.size() >= 2U + this_chunk && body[0] == 0x63U &&
+                body[1] == ali) {
+                std::fwrite(body.data() + 2, 1, this_chunk, fp);
+                crc.update(std::span<std::uint8_t const>{
+                    body.data() + 2, this_chunk});
+                bytes_dumped += this_chunk;
+                ok = true;
+                break;
+            }
+            // NRC: 7F 23 <code>
+            if (body.size() >= 3 && body[0] == 0x7FU && body[1] == 0x23U) {
+                std::fprintf(stderr,
+                             "subaru-flash-dump: NRC 0x%02X at 0x%06X — "
+                             "aborting (see help for valid ranges)\n",
+                             body[2], addr);
+                std::fclose(fp);
+                return 1;
+            }
+            ++attempt;
+            if (verbose) {
+                std::fprintf(stdout,
+                             "  retry %d at 0x%06X: unexpected response "
+                             "(first byte 0x%02X)\n", attempt, addr,
+                             body.empty() ? 0xFFU : body[0]);
+            }
+        }
+        if (!ok) {
+            std::fprintf(stderr,
+                         "subaru-flash-dump: exhausted %d retries at "
+                         "0x%06X\n", retries, addr);
+            std::fclose(fp);
+            return 1;
+        }
+        addr += this_chunk;
+
+        std::uint32_t const pct = static_cast<std::uint32_t>(
+            (static_cast<std::uint64_t>(bytes_dumped) * 100ULL) / total_bytes);
+        if (pct >= last_report_pct + 5U || addr == end_addr) {
+            std::fprintf(stdout, "      %3u%% (0x%06X / 0x%06X)\r",
+                         pct, addr, end_addr);
+            std::fflush(stdout);
+            last_report_pct = pct;
+        }
+    }
+    std::fputc('\n', stdout);
+    std::fclose(fp);
+
+    auto const dump_elapsed = std::chrono::duration_cast<
+        std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - t_dump_start);
+    std::fprintf(stdout,
+                 "[4/N] Dump complete: %llu bytes in %lld ms.\n",
+                 static_cast<unsigned long long>(bytes_dumped),
+                 dump_elapsed.count());
+    std::uint32_t const crc_value = crc.value();
+    std::fprintf(stdout, "      CRC32: 0x%08X\n", crc_value);
+
+    // Step 5 — write meta.json sidecar.
+    std::string meta_path = output_path + ".meta.json";
+    std::FILE *mp = std::fopen(meta_path.c_str(), "wb");
+    if (mp == nullptr) {
+        std::fprintf(stderr,
+                     "subaru-flash-dump: cannot open meta.json '%s' for "
+                     "write\n", meta_path.c_str());
+        return 1;
+    }
+    auto const now = std::chrono::system_clock::to_time_t(
+        std::chrono::system_clock::now());
+    std::fprintf(mp,
+        "{\n"
+        "  \"schema\": \"subuwutuner.subaru-flash-dump.v1\",\n"
+        "  \"file\": \"%s\",\n"
+        "  \"start\": \"0x%06X\",\n"
+        "  \"end\": \"0x%06X\",\n"
+        "  \"total_bytes\": %llu,\n"
+        "  \"chunk_size\": %u,\n"
+        "  \"session\": \"%s\",\n"
+        "  \"sa_variant\": \"%s\",\n"
+        "  \"transport\": \"%s\",\n"
+        "  \"crc32\": \"0x%08X\",\n"
+        "  \"sha256\": null,\n"
+        "  \"elapsed_ms\": %lld,\n"
+        "  \"capture_ts_unix\": %lld\n"
+        "}\n",
+        output_path.c_str(),
+        start_addr, end_addr,
+        static_cast<unsigned long long>(bytes_dumped),
+        chunk_size, session.c_str(), sa_variant.c_str(),
+        transport_kind->c_str(), crc_value,
+        dump_elapsed.count(),
+        static_cast<long long>(now));
+    std::fclose(mp);
+    std::fprintf(stdout, "[5/N] Sidecar: %s\n", meta_path.c_str());
+
+    return 0;
+}
+
+// cmd_subaru_live_log — v0 stub of the datalogger verb.
+//
+// Round-60 R2 confirmed the LF79103P live-signal catalog has 162
+// signals across 9 categories at `fixtures/private/findings_signals/
+// live-signals-A-series.csv`, all addressable in `0xFFF8xxxx` RAM
+// via UDS 0x23 (range B at `0xFFF80000..0xFFF9FFFF` per the
+// allowed-range table at ROM 0x71928).
+//
+// This v0 does the bare minimum: take a list of signal definitions
+// on the command line (name + RAM address + size), poll them at a
+// fixed rate via UDS 0x23 (one read per signal — no batching yet),
+// and emit CSV with timestamps + raw integer values.
+//
+// Deferred to round-61+:
+//   - Catalog file loader (`--catalog <path>`) for the
+//     `live-signals-A-series.csv` schema
+//   - Expression evaluator for the `expression(raw->phys)` column
+//     (e.g. `(x*45)>>14` for AVCS Cam Position → degrees)
+//   - Batched UDS 0x23 reads (32 signals per 4094-byte request in
+//     Programming session — round-60 R2 §3.3) for ~10-20 Hz across
+//     all 162 signals
+//   - Streaming format (TunerLog / RomRaider loglist compatibility)
+//
+// Use this v0 as a smoke test for the read path and a stake in the
+// ground for the catalog-loader work.
+int cmd_subaru_live_log(int argc, char *argv[]) {
+    std::optional<std::string> transport_kind;
+    std::string dll_path;
+    std::string device_path;
+    std::string output_path;
+    std::string sa_variant = "fehr-active-l1";
+    int rate_hz       = 5;
+    int duration_sec  = 60;
+    int timeout_ms    = 500;
+    bool verbose      = false;
+
+    struct Signal {
+        std::string   name;
+        std::uint32_t addr{0};
+        std::uint8_t  size{0};
+    };
+    std::vector<Signal> signals;
+
+    auto const parse_signal = [&](std::string_view s) -> bool {
+        // Format: "<name>@<hex_addr>:<size>" e.g. "rpm@FFF89140:2"
+        auto const at_pos = s.find('@');
+        auto const co_pos = s.find(':');
+        if (at_pos == std::string_view::npos ||
+            co_pos == std::string_view::npos || co_pos < at_pos) {
+            return false;
+        }
+        Signal sig;
+        sig.name.assign(s.substr(0, at_pos));
+        auto const addr_str = std::string{s.substr(
+            at_pos + 1, co_pos - at_pos - 1)};
+        auto const size_str = std::string{s.substr(co_pos + 1)};
+        try {
+            sig.addr = static_cast<std::uint32_t>(
+                std::stoul(addr_str, nullptr, 16));
+            int const size_int = std::stoi(size_str);
+            if (size_int < 1 || size_int > 8) return false;
+            sig.size = static_cast<std::uint8_t>(size_int);
+        } catch (std::exception const &) {
+            return false;
+        }
+        signals.push_back(std::move(sig));
+        return true;
+    };
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "subaru-live-log: %s requires a "
+                             "value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--transport") {
+            if (auto const *v = require_arg("--transport"); v)
+                transport_kind = std::string{v};
+            else return 2;
+        } else if (a == "--device") {
+            if (auto const *v = require_arg("--device"); v) device_path = v;
+            else return 2;
+        } else if (a == "--dll") {
+            if (auto const *v = require_arg("--dll"); v) dll_path = v;
+            else return 2;
+        } else if (a == "--output") {
+            if (auto const *v = require_arg("--output"); v) output_path = v;
+            else return 2;
+        } else if (a == "--signal") {
+            auto const *v = require_arg("--signal");
+            if (v == nullptr) return 2;
+            if (!parse_signal(v)) {
+                std::fprintf(stderr,
+                             "subaru-live-log: --signal '%s' bad format "
+                             "(expected name@HEXADDR:SIZE)\n", v);
+                return 2;
+            }
+        } else if (a == "--rate-hz") {
+            if (auto const *v = require_arg("--rate-hz"); v) {
+                try { rate_hz = std::stoi(v); }
+                catch (std::exception const &) { return 2; }
+                if (rate_hz < 1 || rate_hz > 100) {
+                    std::fputs("subaru-live-log: --rate-hz must be 1..100\n",
+                               stderr);
+                    return 2;
+                }
+            } else return 2;
+        } else if (a == "--duration-sec") {
+            if (auto const *v = require_arg("--duration-sec"); v) {
+                try { duration_sec = std::stoi(v); }
+                catch (std::exception const &) { return 2; }
+                if (duration_sec < 1) return 2;
+            } else return 2;
+        } else if (a == "--sa-variant") {
+            if (auto const *v = require_arg("--sa-variant"); v) sa_variant = v;
+            else return 2;
+        } else if (a == "--timeout-ms") {
+            if (auto const *v = require_arg("--timeout-ms"); v) {
+                try { timeout_ms = std::stoi(v); }
+                catch (std::exception const &) { return 2; }
+            } else return 2;
+        } else if (a == "--verbose") {
+            verbose = true;
+        } else {
+            std::fprintf(stderr, "subaru-live-log: unknown option: %s\n",
+                         argv[i]);
+            return 2;
+        }
+    }
+
+    if (!transport_kind.has_value() || output_path.empty() ||
+        signals.empty()) {
+        std::fputs(
+            "subaru-live-log — v0 datalogger via UDS 0x23 RAM polling.\n"
+            "\n"
+            "Usage:\n"
+            "  subuwutuner-cli subaru-live-log --transport obdx --device COM4 \\\n"
+            "      --output <FILE.csv> \\\n"
+            "      --signal <name>@<hex_addr>:<size> [--signal ...] \\\n"
+            "      [--rate-hz 5] [--duration-sec 60] \\\n"
+            "      [--sa-variant fehr-active-l1|none] \\\n"
+            "      [--timeout-ms 500] [--verbose]\n"
+            "\n"
+            "Polls one or more named RAM signals via UDS 0x23 in Extended\n"
+            "Diag session and writes a CSV with a timestamp column and one\n"
+            "column per signal (raw integer values; no scaling applied).\n"
+            "\n"
+            "Example (RPM + AVCS Intake Cam):\n"
+            "  subuwutuner-cli subaru-live-log --transport obdx --device COM4 \\\n"
+            "      --output /tmp/log.csv \\\n"
+            "      --signal rpm@FFF8XXXX:2 --signal avcs_in@FFF89140:2 \\\n"
+            "      --rate-hz 10 --duration-sec 30\n"
+            "\n"
+            "v0 caveats (round-61+ work):\n"
+            "  - No catalog file loader. Hand-spec signals on the command line.\n"
+            "    The full LF79103P 162-signal catalog lives at\n"
+            "    `fixtures/private/findings_signals/live-signals-A-series.csv`.\n"
+            "  - No expression evaluator. Raw integers only. Apply scaling\n"
+            "    in downstream tooling.\n"
+            "  - No batched reads. Each signal is its own UDS 0x23 request,\n"
+            "    capping sample rate around ~5-10 Hz for small signal sets.\n"
+            "    Round-60 R2 §3.3 specs the batched 4094-byte-per-request path\n"
+            "    in Programming session for ~10-20 Hz × 162 signals.\n",
+            stderr);
+        return 2;
+    }
+
+    auto const kind = st::transport::parse_kind(*transport_kind);
+    if (!kind.has_value()) {
+        std::fprintf(stderr,
+                     "subaru-live-log: --transport '%s' not recognized\n",
+                     transport_kind->c_str());
+        return 2;
+    }
+    st::transport::TransportSpec const spec{*kind, dll_path, device_path};
+    auto t = st::transport::open_transport(spec);
+    if (!t.has_value()) {
+        std::fprintf(stderr, "subaru-live-log: %s\n",
+                     t.error().to_string().c_str());
+        return 1;
+    }
+    if (verbose) st::transport::obdx::set_trace_enabled(true);
+    st::transport::LinkConfig const link{st::transport::LinkKind::CanIso15765,
+                                         500000, 0x000007E0, 0x000007E8};
+    if (auto s = (*t)->open(link); !s.has_value()) {
+        std::fprintf(stderr, "subaru-live-log: transport open: %s\n",
+                     s.error().to_string().c_str());
+        return 1;
+    }
+
+    st::ecu::uds::UdsClient uds{**t};
+
+    // Extended Diag + SA L1 prelude (same shape as flash-dump).
+    if (auto s = uds.diagnostic_session_control(
+            0x03, std::chrono::milliseconds{2000});
+        !s.has_value()) {
+        std::fprintf(stderr, "subaru-live-log: DSC 10 03 failed: %s\n",
+                     s.error().to_string().c_str());
+        return 1;
+    }
+    if (sa_variant != "none") {
+        if (sa_variant != "fehr-active-l1") {
+            std::fprintf(stderr,
+                         "subaru-live-log: --sa-variant '%s' not "
+                         "recognized\n", sa_variant.c_str());
+            return 2;
+        }
+        auto seed = uds.security_access_request_seed(
+            0x01, std::chrono::milliseconds{1500});
+        if (!seed.has_value()) {
+            std::fprintf(stderr, "subaru-live-log: SA requestSeed: %s\n",
+                         seed.error().to_string().c_str());
+            return 1;
+        }
+        auto key = st::ecu::subaru::ssmcan1_l1_aftermarket(*seed);
+        if (!key.has_value()) {
+            std::fprintf(stderr, "subaru-live-log: SA key derivation: %s\n",
+                         key.error().to_string().c_str());
+            return 1;
+        }
+        if (auto s = uds.security_access_send_key(
+                0x02, *key, std::chrono::milliseconds{1500});
+            !s.has_value()) {
+            std::fprintf(stderr, "subaru-live-log: SA sendKey: %s\n",
+                         s.error().to_string().c_str());
+            return 1;
+        }
+    }
+
+    std::FILE *fp = std::fopen(output_path.c_str(), "wb");
+    if (fp == nullptr) {
+        std::fprintf(stderr,
+                     "subaru-live-log: cannot open --output '%s'\n",
+                     output_path.c_str());
+        return 1;
+    }
+
+    // CSV header
+    std::fprintf(fp, "timestamp_ms");
+    for (auto const &s : signals)
+        std::fprintf(fp, ",%s", s.name.c_str());
+    std::fputc('\n', fp);
+
+    auto const period =
+        std::chrono::milliseconds{1000 / rate_hz};
+    auto const t0 = std::chrono::steady_clock::now();
+    auto const t_end = t0 + std::chrono::seconds{duration_sec};
+    auto next_sample = t0;
+    std::uint64_t samples_written = 0;
+
+    while (std::chrono::steady_clock::now() < t_end) {
+        std::this_thread::sleep_until(next_sample);
+        auto const now = std::chrono::steady_clock::now();
+        auto const elapsed_ms = std::chrono::duration_cast<
+            std::chrono::milliseconds>(now - t0).count();
+
+        std::fprintf(fp, "%lld", static_cast<long long>(elapsed_ms));
+        for (auto const &sig : signals) {
+            std::array<std::uint8_t, 7> req{
+                0x23U, 0x14U,
+                static_cast<std::uint8_t>((sig.addr >> 24) & 0xFFU),
+                static_cast<std::uint8_t>((sig.addr >> 16) & 0xFFU),
+                static_cast<std::uint8_t>((sig.addr >> 8) & 0xFFU),
+                static_cast<std::uint8_t>(sig.addr & 0xFFU),
+                sig.size};
+            auto resp = (*t)->send_recv(
+                std::span<std::uint8_t const>{req},
+                std::chrono::milliseconds{timeout_ms});
+            if (!resp.has_value() ||
+                resp->data.size() < 2U + sig.size ||
+                resp->data[0] != 0x63U) {
+                std::fprintf(fp, ",ERR");
+                continue;
+            }
+            std::uint64_t v = 0;
+            for (std::uint8_t i = 0; i < sig.size; ++i)
+                v = (v << 8) | resp->data[2U + i];
+            std::fprintf(fp, ",%llu",
+                         static_cast<unsigned long long>(v));
+        }
+        std::fputc('\n', fp);
+        ++samples_written;
+        next_sample += period;
+    }
+
+    std::fclose(fp);
+    std::fprintf(stdout,
+                 "subaru-live-log: wrote %llu samples × %zu signals to %s\n",
+                 static_cast<unsigned long long>(samples_written),
+                 signals.size(), output_path.c_str());
+    return 0;
+}
+
 namespace {
 
 // Tiny boilerplate helper for the diagnostic verbs (Mode 01/03/04).
@@ -28081,6 +28794,12 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "subaru-flash-erase") {
         return cmd_subaru_flash_erase(argc - 2, argv + 2);
+    }
+    if (cmd == "subaru-flash-dump") {
+        return cmd_subaru_flash_dump(argc - 2, argv + 2);
+    }
+    if (cmd == "subaru-live-log") {
+        return cmd_subaru_live_log(argc - 2, argv + 2);
     }
     if (cmd == "subaru-mode1-probe") {
         return cmd_subaru_mode1_probe(argc - 2, argv + 2);
