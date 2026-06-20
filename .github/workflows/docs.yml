@@ -1,0 +1,62 @@
+# Build and deploy the MkDocs site to GitHub Pages.
+#
+# One-time setup (do this once via GitHub UI):
+#   Settings -> Pages -> Build and deployment -> Source: "GitHub Actions"
+# Without that, the deploy step fails with "Get Pages site failed" /
+# HTTP 404. Site URL: https://buffjesus.github.io/SubuwuTuner/
+
+name: docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - docs/**
+      - mkdocs.yml
+      - requirements-docs.txt
+      - .github/workflows/docs.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-docs.txt
+
+      - run: pip install -r requirements-docs.txt
+
+      # --strict treats warnings as errors, including dead cross-doc
+      # links. Initial site build is clean; new broken links will fail
+      # CI loudly instead of shipping a 404.
+      - run: mkdocs build --strict
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment

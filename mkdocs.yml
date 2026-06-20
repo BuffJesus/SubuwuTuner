@@ -1,0 +1,148 @@
+site_name: SubuwuTuner
+site_description: A free, open-source Subaru ECU tuning suite — read, edit, datalog, and reflash supported Subaru calibrations from a clean-room C++23 codebase.
+site_url: https://buffjesus.github.io/SubuwuTuner/
+site_author: BuffJesus
+
+repo_url: https://github.com/BuffJesus/SubuwuTuner
+repo_name: BuffJesus/SubuwuTuner
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  language: en
+  features:
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - content.action.edit
+    - content.action.view
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Use system preference
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep purple
+      accent: deep purple
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep purple
+      accent: deep purple
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  font:
+    text: Inter
+    code: JetBrains Mono
+  icon:
+    repo: fontawesome/brands/github
+    edit: material/pencil
+    view: material/eye
+
+plugins:
+  - search
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      title: On this page
+  - pymdownx.betterem
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/BuffJesus/SubuwuTuner
+      name: SubuwuTuner on GitHub
+
+# Site nav lists hand-authored user-facing guides. Pages stubbed below
+# point at the existing numbered design docs under docs/*.md until they
+# are unpacked into dedicated guides. The numbered design docs
+# (00-overview.md through 44-tune-export.md) are excluded from the
+# published site nav — they remain in the repo and are browsable on
+# GitHub for project authors, analysts, and future Claude sessions.
+nav:
+  - Home: index.md
+  - Getting started:
+      - Install: getting-started/installation.md
+      - Quickstart: getting-started/quickstart.md
+      - Your first tune: getting-started/first-tune.md
+  - Concepts:
+      - Overview: concepts/overview.md
+      - Definition packs: concepts/definition-packs.md
+      - .stune projects: concepts/stune-projects.md
+      - Transports: concepts/transports.md
+      - Security Access: concepts/security-access.md
+      - Brick protection: concepts/brick-protection.md
+  - GUI:
+      - Overview: gui/overview.md
+  - CLI:
+      - Overview: cli/overview.md
+  - Workflows:
+      - Reading your ROM: workflows/reading-rom.md
+      - Editing a table: workflows/editing-tables.md
+      - Datalogging: workflows/datalogging.md
+      - Flashing safely: workflows/flashing.md
+  - Reference:
+      - Definition format: reference/definition-format.md
+      - .stune format: reference/stune-format.md
+      - Glossary: reference/glossary.md
+  - Contributing:
+      - Architecture: contributing/architecture.md
+      - Building from source: contributing/building.md
+      - Testing: contributing/testing.md
+      - Clean-room methodology: contributing/clean-room.md
+
+# Exclude the numbered design / planning / handoff docs from the
+# published site. They stay in the repo for project authors and
+# future sessions — browse on GitHub. See docs/README.md.
+exclude_docs: |
+  [0-9][0-9]-*.md
+  README.md
+  analyst-mode-prompt.md
+  install.md
+  getting-started.md
+  handoffs/
