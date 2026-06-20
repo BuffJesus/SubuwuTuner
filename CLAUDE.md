@@ -77,7 +77,8 @@ For module-by-module detail, read the headers under `src/<module>/include/` and 
 | Set up CMake, vcpkg, CI | `docs/07-build-and-tooling.md` |
 | Decide on a GUI framework | `docs/03-tech-stack.md` |
 | Plan a phase or milestone | `docs/04-roadmap.md` |
-| Reason about brick-protection or flash safety | `docs/05-improvements.md` §4, `docs/31-brick-protection-by-isa.md` (per-ISA recipes), `docs/08-testing-strategy.md` Tier 4 |
+| Reason about brick-protection or flash safety | `docs/05-improvements.md` §4, `docs/31-brick-protection-by-isa.md` (per-ISA recipes), `docs/08-testing-strategy.md` Tier 4, `docs/43-jtag-recovery.md` (operational E2-Lite procedure for a bricked LF79xxxP) |
+| Reason about / implement the Atlas tune-export pipeline (sum-preserving cal writes for LF79xxxP — checksum-balance at 0x1FFFFE, FACI silent-drop catalog, boot integrity bytes; lives at `src/tune_export/`) | `docs/44-tune-export.md` |
 | Reason about emissions / jurisdiction policy | `docs/06-legal-ethics.md` |
 | Reason about clean-room IP boundaries | `docs/15-clean-room-engineering.md` |
 | Reason about auto-tune | `docs/12-auto-tuning.md` |

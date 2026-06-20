@@ -62,14 +62,57 @@ recovery paths, not "we wrote a shim" hopium.
       signatures hold. `st::flash::verify_boot_signatures_sh2a_2mb`
       is the host-side pre-flight mirror; pre-flash buffers should
       run through it before being sent to the ECU.
-    - **RAM consistency check** (`FUN_00000B88`): sum of 28 BE u16
-      words from system RAM `0xFFF82008..0xFFF82040` compared
-      against the value at `0xFFF82000`. Verifies the C-runtime
-      init didn't corrupt the configuration table; does not
-      constrain flash content.
+    - **RAM consistency check** (`FUN_00000B88`): 56-byte hash
+      over RAM `0xFFF82008..0xFFF82040` via the Feistel-family
+      helper at ROM `0x884`, gated by two battery-backed marker
+      cells. `*0xFFF82016` must equal `0x55AA`; `*0xFFF82002`
+      must equal either `0xA5A5` (priming — hash check fires and
+      must match `*0xFFF82000`) or `0x5A5A` (steady-state — hash
+      check is skipped). Failure trips bit 0x20 in `*0xFFF99819`
+      and wipes 16 bytes at `*0xFFF82019`. Per round-58 T1#3
+      decompile; earlier drafts described this as "sum of 28 u16
+      words" which was wrong about both the algorithm (it's a
+      Feistel hash) and the gating (the markers are what fires
+      it). The RAM region is battery-backed, so a long power-off
+      or battery disconnect can leave the markers in a "priming,
+      hash mismatch" state and the integrity check then fails on
+      every cold boot until JTAG resets them (per
+      `docs/43-jtag-recovery.md` step 7).
    If either check fails, bit 1 of MMIO `0xFFF99819` is set, the
    bootloader enters waiting-for-reprogram mode, and the
    application entry at `0x001F094C` is not reached.
+4. **Runtime commit gate** (round-58 T1#1, decompile of `FUN_0x319E`).
+   The UDS routine `0x31 0x01 0x0202 0x01` (the wire COBB and the
+   factory installer send as the very last step of any flash
+   session) gates on three preconditions: session-state cell
+   `*0xFFF9C0F4 == 5`, optionRecord byte `== 1`, and **`u16 BE
+   sum(0x6000..0x200000) == 0x5AA5`**. The helper at ROM `0x3582`
+   is a naive u16 BE accumulator (no skip ranges, no masking) that
+   reads flash directly via the FCU — no RAM mirror — so the sum
+   cannot be spoofed via mode-0x3D RMBA writes. This is a
+   protocol-layer brick-protection mechanism distinct from the
+   silicon-level bootloader sector lock and the boot-time
+   signature check: it gates the *coherent firmware* marker that
+   the boot integrity check then reads. COBB tunes preserve the
+   sum by writing a compensating "balance" cell at u16 BE
+   `0x1FFFFE..0x1FFFFF`; the SubuwuTuner Atlas tune-export
+   pipeline (`docs/44-tune-export.md`, `st::tune_export` in
+   `src/tune_export/`) does the same. Round-58 verified bit-exact
+   against an actual Fehr decat tune.
+5. **FCU silent-drop region** (round-58 T1#2, decompile of `0xB6`
+   handler at ROM `0x2BC0` + sector table at `0x436C..0x44B4`).
+   Any 0xB6 write to flash addresses `[0x000000, 0x008000)`
+   (sector ops 0x00..0x03 in the 28-sector table, populated to
+   RAM `0xFFF9BE48` at boot) is **silently rejected**: the FCU's
+   FACI window protection bit fires, the sequencer at ROM `0x3910`
+   reads only `FSTATR1.FRDY` (never `FSTATR2.ILGCOMERR`), and the
+   dispatcher emits `F6` while real flash is unchanged. This is
+   the layer that keeps protocol-level writes from clobbering the
+   `0x5555 @ 0x6000` boot signature. Writes to `>=0x200000` are
+   far worse — the FCU sequencer enters an infinite WDT loop at
+   ROM `0x3A26`, the watchdog fires, and the ECU resets mid-write.
+   The tune-export pipeline pre-emptively refuses both ranges so
+   we never even see the silent drop or WDT trap.
 
 Concrete facts staged at `fixtures/private/brick-protection.md` (analyst-side,
 2 MB plaintext Generation-A.2 ROM):
@@ -218,27 +261,52 @@ The expected case. No special tooling.
    Verify routine catches identity match this time, ECU resets,
    normal boot resumes.
 
-### Recovery procedure — bootloader-corruption brick
+### Recovery procedure — bootloader-corruption brick (or boot integrity halt)
 
-Only possible via a custom kernel that ignored the allow-list. Not
-reachable via SubuwuTuner's flash path (gates above), but the
-recipe exists for the bench rig's deliberate-brick test:
+Reachable in two ways. Either via a custom kernel that ignored
+the allow-list (not reachable via SubuwuTuner's flash path —
+gates above prevent it). OR via cumulative real-flash drift that
+breaks the boot integrity check at `FUN_00000C54` even though
+every UDS write returned `F6`: that's what happened to the
+junkyard LF79002P bench on round-57, where 8064 `0xB6` blocks
+of a 2 MB restore all came back positive but the FCU staging
+buffer (which `0xB7` reads) diverged from real flash (which the
+sum and boot integrity check read) — see README §"What We
+Learned by Killing Our First ECU".
 
-1. **Hardware serial boot mode.** SH-2A has a mode pin that, asserted
-   at reset, enters a host-controlled serial bootloader that lives in
-   silicon ROM (not flash). The serial bootloader can re-flash any
-   sector including bootloader.
-2. **Reach the mode pin.** Per the bench-rig assembly (`docs/28`),
-   the mode pin is wired to a switch on the bench harness. **On a
-   car, the mode pin requires opening the ECU case** — it is NOT
-   broken out to the OBD-II connector. Shop-only recovery, not
-   side-of-the-road.
-3. **Host tool re-flashes a known-good bootloader image.** The
-   bench rig's tool is a Renesas E1/E2 in-circuit programmer
-   (or equivalent). SubuwuTuner does NOT ship this capability for
-   end users — re-flashing a bootloader is too dangerous to put a
-   one-click button on, and the mode-pin requirement makes it
-   inappropriate for a tuning tool.
+Operational recipe (see `docs/43-jtag-recovery.md` for the full
+step-by-step):
+
+1. **Renesas E2-Lite JTAG** is the bench rig's recovery tool.
+   ~$60 part (Digi-Key `RTE0T00020KCE00000R` or equivalent) +
+   14-pin Renesas user-interface cable. JTAG operates below the
+   FCU protocol layer and bypasses FACI window protection
+   entirely.
+2. **Reach the debug header.** On a Subaru bench ECU it's
+   on the PCB; physical access requires shell disassembly. **On
+   a car the OBD-II connector does not expose JTAG** — shop-only
+   recovery, not side-of-the-road. Same caveat as the mode-pin
+   path below.
+3. **Erase + JTAG-write the stock reference ROM** from
+   `D:/Subuwu/subaru-data/reference-dumps/bench-junkyard-stock.bin`
+   (or the CID-appropriate stock dump). Optionally pre-write the
+   RAM markers `*0xFFF82016 = 0x55AA` and `*0xFFF82002 = 0x5A5A`
+   to put the boot integrity into steady-state on the first cold
+   boot. Power-cycle and verify via the standard
+   `subaru-dsc-unblock-sequence` chain.
+
+The older SH-2A **hardware serial boot mode** (mode pin asserted
+at reset, host-controlled serial bootloader in silicon ROM)
+remains the legacy fallback recipe. EcuFlash / FTDI tooling
+exists for this path but is unconfirmed for the SH72531-class
+chips in FA20DIT ECUs (ID-code lockout per 86/BRZ forum reports
+as of 2015). Use it for older SH7058 (EJ-era) parts; default to
+E2-Lite JTAG for SH72531 (FA20DIT-era).
+
+SubuwuTuner does NOT ship either recovery capability for end
+users — re-flashing a bootloader is too dangerous to put a
+one-click button on, and the physical-access requirement makes
+it inappropriate for a tuning tool. The bench rig has both.
 
 ### Bench-rig validation (Tier 4)
 

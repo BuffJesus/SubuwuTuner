@@ -129,7 +129,7 @@ $CLI project-flash /tmp/bench-rig-test.stune --transport obdx --device COM5
 
 **Pass:** write completes, read-back verifies, ECU resets cleanly, full ROM re-pull shows the delta in place + everything else unchanged.
 
-**Fail (worst case):** ECU doesn't boot. Power-cycle. If it still doesn't respond to `ap3 state` / OBDX SA, this is the deliberate-brick scenario from `docs/31`. Recovery path: mode-pin serial boot. Document everything.
+**Fail (worst case):** ECU doesn't boot. Power-cycle. If it still doesn't respond to `ap3 state` / OBDX SA, this is the deliberate-brick scenario from `docs/31`. Recovery path: Renesas E2-Lite JTAG per `docs/43-jtag-recovery.md` (preferred — bench-validated for SH72531-class FA20DIT) OR mode-pin serial boot (legacy SH7058 fallback). Document everything.
 
 ## Step 6 — Power-loss inject
 

@@ -1,5 +1,27 @@
 # 37 — Subaru ECU flash protocol reference
 
+> **Status update (rounds 14-59, June 2026)** — much of the "Phase
+> C blocker" speculation later in this doc has been superseded by
+> direct bench-rig RE on a junkyard LF79002P. Phase C unblock is
+> via `subuwutuner-cli subaru-dsc-unblock-sequence
+> --burst-write-extended` (round 19: a 5-write Mode 0x3D burst
+> that clears the F2/F3/F4 fault cascade ahead of the aggregator
+> tick). Phase D is `34 04 33 <addr-3> <size-3>` with SA L1 +
+> Programming session (round 22, refined in round 51; SA L3 is
+> NOT required). Full chain shipped as
+> `subaru-dsc-unblock-sequence --write-cycle` and `subaru-flash-
+> write-cycle`. The commit gate at ROM `0x319E` requires `u16 BE
+> sum(0x6000..0x200000) == 0x5AA5` (round 58 T1#1, bit-exact
+> verified against a Fehr decat tune); the Atlas tune-export
+> pipeline `st::tune_export` (`docs/44-tune-export.md`,
+> `src/tune_export/`) preserves this. Bench LF79002P bricked on
+> round 57 from cumulative real-flash drift (`F6` is not a
+> receipt — the FCU staging buffer that `0xB7` reads can diverge
+> from real flash); recovery procedure at `docs/43-jtag-recovery.md`.
+> The "reference architecture" + ζ1 material below is preserved
+> as historical RE record but is now downstream of bench-validated
+> facts.
+
 Reference architecture captured from analyst RE5 (2026-06-12 PM,
 `D:/Subuwu/findings/re-2026-06-12-pm/`). Method list at
 `findings/re-2026-06-12-pm/libflashsubaru_methods.txt`.
