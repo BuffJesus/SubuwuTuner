@@ -1,71 +1,77 @@
 # Security Access
 
 UDS service `0x27` (SecurityAccess) is the seed-key challenge an ECU
-runs before it lets you write flash. Subaru ECUs come in several
-flavors depending on what's been installed:
+runs before it lets you write flash. Subaru ECUs may answer this
+challenge differently depending on what's been written to them
+previously — factory-fresh and post-aftermarket-tool ECUs do not
+always negotiate the same way.
 
-| State | SA variant | CLI flag |
-|---|---|---|
-| Factory-stock | SSMCAN1 Gen-A 16-round Feistel | `--sa-variant ssmcan1-factory` (default) |
-| COBB-installed (uninstalled state) | OTS-layer L1 swap (RK_L35 substitution) | `--sa-variant cobb-uninstalled` |
-| COBB-installed (tuned state) | OTS layer + e-tune layer (L3) | `--sa-variant cobb-tuned` |
-| Fehr-active (L1) | Forward direction with substituted keys | `--sa-variant fehr-active` |
-| Fehr-active (L3) | Same mechanism as L1, L3 keys | `--sa-variant fehr-active-l3` |
+SubuwuTuner ships several **`--sa-variant`** options so you can pick
+the algorithm flavor matching the ECU in front of you. You generally
+don't need to know which one ahead of time — try the most likely,
+and on NRC 0x33 (Security Access Denied) the CLI tells you which to
+try next.
 
-## Picking a variant
+## Variants
 
-You usually don't need to know the install state ahead of time —
-`subuwutuner-cli` tries the requested variant, and if NRC 0x33 comes
-back (security access denied / wrong seed), the CLI tells you which
-variant to try next.
+| `--sa-variant` | When to try it |
+|---|---|
+| `ssmcan1-factory` *(default)* | OEM stock ECU |
+| `cobb-uninstalled` | Aftermarket-touched ECU returned to "uninstalled" state |
+| `cobb-tuned` | ECU currently running an aftermarket calibration |
+| `fehr-active` | Variant observed on Cornelio's car; named for the discoverer |
+| `fehr-active-l3` | Same variant, level-3 access |
+
+## Picking one
 
 ```bash
-# Factory ECU
+# OEM-stock ECU
 subuwutuner-cli rom-pull --authenticate \
                          --sa-variant ssmcan1-factory \
                          --transport obdx --device COM5 \
                          -o rom.bin
 
-# COBB-tuned ECU
+# Aftermarket-tuned ECU
 subuwutuner-cli rom-pull --authenticate \
                          --sa-variant cobb-tuned \
                          --transport obdx --device COM5 \
                          -o rom.bin
-
-# Fehr-active L3
-subuwutuner-cli ssm-a8-poll --authenticate \
-                            --sa-variant fehr-active-l3 \
-                            --transport obdx --device COM5 \
-                            --did 0xF300
 ```
 
-## Where the variants come from
-
-All five variants in the tree were recovered through clean-room analyst
-work — captured seed/key pairs from a live bus, dispatcher disassembly,
-and pattern matching against the factory algorithm. No commercial-tool
-source was decompiled. Methodology:
-[`docs/15-clean-room-engineering.md`](https://github.com/BuffJesus/SubuwuTuner/blob/main/docs/15-clean-room-engineering.md){ target="_blank" }.
-
-The factory algorithm is a 16-round Feistel keyed by a fixed RAM nonce
-read at `0xFFFFF220`. The aftermarket variants substitute different key
-schedules and (in the Fehr case) reverse the iteration direction. All
-variants share the same dispatcher.
+If the chosen variant returns NRC 0x33, swap to the next likely
+candidate — the CLI prints a hint with the most-likely next pick.
 
 ## When SA is required
 
 | Operation | SA required? |
 |---|---|
 | OBD-II Mode 01 / 09 (engine data, VIN, CIDs) | No |
-| SSM A8 RAM polling | Depends on ECU state; COBB-tuned needs L3 |
-| UDS RDBI / RMBA (data read) | No on most CIDs |
-| UDS DSC 0x10 0x02 (Programming session) | **Yes**, L1 |
-| UDS RequestDownload / TransferData / B6 | **Yes**, L1, plus Programming session |
-| Routine Control (0x31) commit | **Yes**, L1 |
+| SSM A8 RAM polling | Varies by ECU state |
+| UDS RDBI / RMBA (data read) | Usually no |
+| UDS DSC 0x10 0x02 (Programming session) | **Yes**, level 1 |
+| UDS RequestDownload / TransferData | **Yes**, level 1, plus Programming session |
+| Routine Control (0x31) commit | **Yes**, level 1 |
+
+## Methodology
+
+The variants in the tree were recovered through clean-room analyst
+work: captured seed/key pairs from a live bus, behavioral diffing
+against the factory algorithm, and pattern recovery from observable
+inputs and outputs. **No commercial-tool source was decompiled, read,
+or referenced** — the wall between analyst-mode sessions and the
+implementer that wrote the C++ is documented in
+[`docs/15-clean-room-engineering.md`](https://github.com/BuffJesus/SubuwuTuner/blob/main/docs/15-clean-room-engineering.md){ target="_blank" }
+and enforced through output isolation and tool restrictions.
+
+The algorithmic detail (round counts, key schedules, dispatcher
+shape) lives in the analyst-source design docs, not on this
+user-facing page.
 
 ## Deeper detail
 
 - [`docs/23-security-access.md`](https://github.com/BuffJesus/SubuwuTuner/blob/main/docs/23-security-access.md){ target="_blank" }
-  — full SecurityAccess design + plugin model.
+  — SecurityAccess module design + plugin model.
 - [`docs/38-subaru-sa-variants.md`](https://github.com/BuffJesus/SubuwuTuner/blob/main/docs/38-subaru-sa-variants.md){ target="_blank" }
   — variant catalog cross-referenced to ECU install states.
+- [Contributing → Clean-room methodology](../contributing/clean-room.md)
+  — the wall and the boundaries.

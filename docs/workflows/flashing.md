@@ -43,9 +43,9 @@ byte. Read this before any real flash.
 
 ## Tune-export pipeline (LF79xxxP)
 
-For FA20DIT (SH-2A LF79xxxP family) calibration writes, the
-sum-preserving tune-export pipeline (`st::tune_export`) handles the
-boot-integrity contract automatically:
+For FA20DIT (SH-2A LF79xxxP family) calibration writes, the boot
+integrity contract constrains what a calibration write may touch.
+`st::tune_export` handles the contract for you:
 
 ```bash
 subuwutuner-cli tune-export-build \
@@ -55,14 +55,14 @@ subuwutuner-cli tune-export-build \
 
 What it does for you:
 
-- Verifies the u16 BE sum target `0x5AA5` over `[0x6000, 0x200000)`
-- Emits a compensating balance write at `0x1FFFFE` to preserve the sum
-- Skips writes into FACI-locked regions (`[0, 0x8000)`)
-- Preserves boot-integrity signatures (`0x6000`, `0x6010`, `0x6C`, `0x1FFFF2`)
+- Verifies your candidate image against the per-ISA boot-integrity contract
+- Skips writes into write-locked regions
+- Preserves the contract's required invariants by emitting compensating writes where needed
 - Emits a skip-unchanged-blocks write plan (delta-flash friendly)
 
 Cross-CID validated across LF79002P (bench donor) and LF79101P (the
-e-tune CID on Cornelio's car).
+e-tune CID on Cornelio's car). The contract specifics — addresses,
+ranges, invariants — live in the spec.
 
 Spec:
 [`docs/44-tune-export.md`](https://github.com/BuffJesus/SubuwuTuner/blob/main/docs/44-tune-export.md){ target="_blank" }.
@@ -116,9 +116,10 @@ Both gates are required. Trade-off + failure modes:
 - **Verify failure mid-flash.** Orchestrator halts immediately. Run
   `project-flash --resume` to pick up; the resume path re-verifies
   before continuing.
-- **NRC 0x22 from the commit routine.** The boot-integrity sum check
-  failed. Re-verify your image with `checksum-verify`; the most likely
-  cause is a balance-cell miscalculation in `tune-export-build`.
+- **NRC 0x22 from the commit routine.** The boot-integrity contract
+  check failed. Re-verify your image with `checksum-verify`; the most
+  likely cause is a miscalculated compensating write in
+  `tune-export-build`.
 - **ECU silent on the bus after a failed write.** Likely boot integrity
   failure. JTAG recovery procedure:
   [`docs/43-jtag-recovery.md`](https://github.com/BuffJesus/SubuwuTuner/blob/main/docs/43-jtag-recovery.md){ target="_blank" }.

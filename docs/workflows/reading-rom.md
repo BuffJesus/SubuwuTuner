@@ -31,11 +31,12 @@ A 2 MB FA20DIT dump takes ~8 minutes — the RMBA chunk cap is 0x800
     and
     [`docs/04-roadmap.md`](https://github.com/BuffJesus/SubuwuTuner/blob/main/docs/04-roadmap.md){ target="_blank" }.
 
-## Source 2 — COBB AccessPort V3 (file vault)
+## Source 2 — COBB AccessPort V3 (your own AP)
 
-If you have a married COBB AP, SubuwuTuner can pull the on-AP ROM
-without touching the car directly. The AP keeps a backup of the current
-calibration at `/backupcksum`.
+If you own a married COBB AccessPort and want to read what it
+currently holds, SubuwuTuner exposes the AP as a file-vault target
+so you can list and pull files from it via USB. The AP keeps its
+own backup of the current calibration that this surface can read.
 
 ```bash
 subuwutuner-cli ap3 state           # AP serial, firmware version, MD5
@@ -43,16 +44,19 @@ subuwutuner-cli ap3 ls /backupcksum
 subuwutuner-cli ap3 pull /backupcksum/<filename> stock.bin
 ```
 
-The AP marriage gate is enforced; an unmarried AP refuses operations
-unless you pass `--allow-unmarried-ap`.
+SubuwuTuner respects the AP's own marriage state: an unmarried AP
+refuses mutating operations through SubuwuTuner. `--allow-unmarried-ap`
+overrides this for advanced workflows where you know what you're doing
+(e.g., a fresh-from-the-box AP you're inspecting).
 
 USB driver setup (Zadig WinUSB on Windows, udev rule on Linux):
 [Install → USB hardware setup](../getting-started/installation.md#5-usb-hardware-setup-only-if-reading-or-flashing-a-real-ecu).
 
 ## Source 3 — `.ptm` tune file
 
-A `.ptm` is a COBB-format tune. SubuwuTuner can decrypt it against a
-known base ROM to materialize the patched calibration as a `.bin`:
+A `.ptm` is the file format COBB-style tunes ship in. SubuwuTuner can
+read one against a known base ROM to materialize the patched
+calibration as a `.bin` you can open as a project:
 
 ```bash
 # With explicit base ROM
