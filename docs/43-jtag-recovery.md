@@ -89,6 +89,8 @@ The boot integrity check (`FUN_00000B88` at ROM `0xB88`) reads RAM markers at `0
 
 If your tool doesn't support live RAM writes, skip this step — the first boot may go to recovery, but subsequent boots tend to settle once the markers initialize. If the ECU doesn't recover after 2-3 power cycles, this is the next step.
 
+Alternative (priming-path, fully computable per round-60 R4): if you'd rather go through priming instead of skipping the hash, the helper at ROM `0x884` is a naive u16 BE sum, so you can compute the expected hash for any chosen 56-byte content. Procedure: choose content for `0xFFF82008..0xFFF82040` (easy default: all zeros → expected sum `0x0000`), JTAG-write that content, JTAG-write `*0xFFF82000 ← expected_sum` (u16 BE), `*0xFFF82002 ← 0xA5A5` (priming marker), `*0xFFF82016 ← 0x55AA`. First boot fires the hash, matches, and transitions the marker to `0x5A5A`. The steady-state shortcut above is still preferred (zero compute, single boot to confirm).
+
 ### 8. Power-cycle and verify
 - Disconnect 12 V.
 - Wait 30 seconds for caps to discharge.
