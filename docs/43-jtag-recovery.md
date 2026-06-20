@@ -109,7 +109,7 @@ Less likely causes:
 ## Future-proofing
 
 Once the bench is restored:
-- Always write tunes via the **Atlas tune-export pipeline** (per `subuwu::tune_export` spec in `docs/21-tune-export.md`). The pipeline refuses writes that would brick the ECU again.
+- Always write tunes via the **Atlas tune-export pipeline** (per `st::tune_export` spec in `docs/44-tune-export.md`). The pipeline refuses writes that would brick the ECU again.
 - If the user's actual car ever exhibits these symptoms, the SAME procedure applies — substitute the user's stock ROM (LF79103P-class) as the reference. The boot integrity rules are universal across the LF79xxxP family (verified round-58 cross-CID diff).
 
 ## References

@@ -4,7 +4,7 @@
 // st::tune_export — sum-preserving tune image builder for Subaru
 // LF79xxxP FA20DIT firmware.
 //
-// Spec: docs/21-tune-export.md. Round-58 + round-59 analyst RE.
+// Spec: docs/44-tune-export.md. Round-58 + round-59 analyst RE.
 // The brick-protection contract on this firmware is
 //   `u16 BE sum(0x6000..0x200000) == 0x5AA5`
 // enforced by the commit handler at ROM 0x319E. COBB and after-

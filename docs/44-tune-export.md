@@ -1,6 +1,8 @@
-# Atlas Tune-Export Pipeline (`subuwu::tune_export`)
+# Atlas Tune-Export Pipeline (`st::tune_export`)
 
-> **Status**: Specification ready for implementation. Built on round-58 Tier 1 findings (checksum-balance at `0x1FFFFE`, FCU silent-drop catalog, boot integrity exact requirements). Cross-CID validity confirmed for the LF79xxxP family.
+> **Status**: Shipped — `src/tune_export/`, 18 unit tests / 98 assertions / all pass. Built on round-58 Tier 1 findings (checksum-balance at `0x1FFFFE`, FCU silent-drop catalog, boot integrity exact requirements). Cross-CID validity confirmed for the LF79xxxP family in round-59 T3#7.
+>
+> The shipped module sits in the project's `st::` namespace (analyst's draft used `subuwu::`) and uses `Result<T>` for `build_image` failure paths (project rule: no exceptions in domain code; analyst's draft threw `std::invalid_argument`). All other API shapes match this spec.
 
 ## What this module does
 
@@ -14,7 +16,7 @@ Transform an Atlas calibration tune (set of (offset, bytes) diffs against a base
 ## Architecture invariants
 
 ```cpp
-namespace subuwu::tune_export {
+namespace st::tune_export {
 
 // FROM ROUND-58 T1#1 (verified bit-exact against Fehr decat tune)
 constexpr uint16_t SUM_TARGET        = 0x5AA5;
@@ -37,16 +39,17 @@ constexpr std::array<uint32_t, 5> BOOT_INTEGRITY_BYTES_MUST_BE_PRESERVED = {
     0x00006C,   // u8 paired-equality byte (mirrors high byte of *0x6010)
     0x006000,   // u16 BE flash sig 1 (= 0x5555)
     0x006010,   // u16 BE paired-equality cell (= 0x0504 stock; high byte must match *0x6C)
-    0x1FFFF2,   // u16 BE flash sig 2 (= 0xAAAA)
+    0x1FFFF2,   // u16 BE flash sig 2 head (= 0xAA)
+    0x1FFFF3,   // u16 BE flash sig 2 tail (= 0xAA) — the cell is read as u16, both bytes matter
 };
 
-}  // namespace subuwu::tune_export
+}  // namespace st::tune_export
 ```
 
 ## Core types
 
 ```cpp
-namespace subuwu::tune_export {
+namespace st::tune_export {
 
 struct CalDiff {
     uint32_t offset;
@@ -63,32 +66,35 @@ struct ValidationError {
     enum class Kind {
         FaciLockedAddress,       // diff in [0x0..0x7FFF]
         WdtTrapAddress,          // diff at or beyond 0x200000
-        BalanceClobber,          // diff overlaps 0x1FFFFE
-        TrailerClobber,          // diff overlaps [0x1FFFE0..0x1FFFFD]
+        BalanceClobber,          // diff overlaps 0x1FFFFE..0x1FFFFF
+        TrailerClobber,          // diff overlaps [0x1FFFE0..0x1FFFFE)
         BootIntegrityClobber,    // diff modifies a byte the boot check reads
-        UnalignedDiff,           // diff offset isn't on a 1-byte boundary (always allowed) — reserved
+        BaseSizeMismatch,        // base ROM is not exactly 0x200000 bytes
     };
     Kind kind;
     uint32_t offending_offset;
     std::string explanation;
 };
 
-}  // namespace subuwu::tune_export
+}  // namespace st::tune_export
 ```
 
 ## API
 
 ```cpp
-namespace subuwu::tune_export {
+namespace st::tune_export {
 
 // Validates the cal diffs against architecture invariants.
 // Returns empty vector if all diffs are accepted; otherwise lists every violation.
 [[nodiscard]] std::vector<ValidationError>
-validate(std::span<const CalDiff> diffs) noexcept;
+validate(std::span<const uint8_t> base,
+         std::span<const CalDiff> diffs);
 
 // Builds the post-tune ROM image: applies diffs to base ROM, recomputes balance,
-// asserts sum invariant. Throws std::invalid_argument if validation fails.
-[[nodiscard]] std::vector<uint8_t>
+// preserves the sum invariant. Returns Result<vector<uint8_t>>; failure carries
+// PolicyDenied + the first violation's explanation. Use validate() directly to
+// surface all violations to a UI.
+[[nodiscard]] Result<std::vector<uint8_t>>
 build_image(std::span<const uint8_t> base_rom,
             std::span<const CalDiff> diffs);
 
@@ -107,7 +113,7 @@ compute_balance(std::span<const uint8_t> image_with_balance_zeroed) noexcept;
 [[nodiscard]] uint16_t
 u16be_sum(std::span<const uint8_t> buf, uint32_t start, uint32_t end_exclusive) noexcept;
 
-}  // namespace subuwu::tune_export
+}  // namespace st::tune_export
 ```
 
 ## Implementation outline
@@ -148,8 +154,10 @@ return errors;
 
 ### `build_image`
 ```cpp
-auto errors = validate(diffs);
-if (!errors.empty()) throw std::invalid_argument(format_errors(errors));
+auto errors = validate(base_rom, diffs);
+if (!errors.empty()) {
+    return failure(Error{ErrorCode::PolicyDenied, errors[0].explanation});
+}
 
 std::vector<uint8_t> img(base_rom.begin(), base_rom.end());
 for (auto const& d : diffs) {
@@ -183,7 +191,7 @@ for (uint32_t addr = WRITABLE_START; addr < WRITABLE_END; addr += 256) {
     WriteBlock b{};
     b.addr = addr;
     std::copy_n(built_image.begin() + addr, 256, b.data.begin());
-    b.tag = (/* any byte in block is a CalDiff offset */ ? Tag::CalChange : Tag::RestoreFromBase);
+    b.tag = Tag::CalChange;  // the block contains at least one changed byte
     plan.push_back(std::move(b));
 }
 

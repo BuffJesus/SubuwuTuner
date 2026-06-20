@@ -28,7 +28,7 @@ SubuwuTuner is an open-source research and tooling project for Subaru ECUs. The 
 - **CAN protocol analysis** — replay, DBC decode, baseline modeling, change detection, `.cdb` bundle format
 - **Logging and diagnostics tooling** — multi-sink datalogger, live gauge cluster, CSV export
 - **Flashing infrastructure research** — flash orchestrator, manifest + journal, backup store, per-ISA brick-protection model, security-access variants
-- **Reverse engineering and documentation** — bench rig with junkyard ECUs, written handoffs between analyst and implementer sessions, design docs numbered `docs/00` through `docs/42`
+- **Reverse engineering and documentation** — bench rig with junkyard ECUs, written handoffs between analyst and implementer sessions, design docs numbered `docs/00` through `docs/44`
 
 The project is C++23 throughout, Apache 2.0 licensed, headless-first (every GUI capability is reachable from the `subuwutuner-cli`), and cross-platform from day one.
 
@@ -195,7 +195,7 @@ code/
 │   └── cli/                   subuwutuner-cli
 ├── tools/
 │   └── defgen/                Python definition-pack generator
-├── docs/                      Design docs (00–42), getting-started, install
+├── docs/                      Design docs (00–44), getting-started, install
 ├── tests/unit/                Catch2 tests, by module
 └── fixtures/
     ├── demo-pack/             Synthetic always-available example pack
