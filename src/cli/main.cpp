@@ -21330,6 +21330,437 @@ int cmd_subaru_passive_log(int argc, char *argv[]) {
     return 0;
 }
 
+// cmd_subaru_diagnostic — DTC read / clear / control via the
+// standard ISO 14229 + OBD-II services. Round-62 R11 catalogued
+// the handlers:
+//   0x04 OBD-II ClearDiagnosticInformation: ROM 0xBA6FC
+//   0x19 UDS ReadDTCInformation             ROM 0xBEDCC
+//   0x85 UDS ControlDTCSetting              ROM 0xC58BC
+// All standard wires, default session, no SecurityAccess.
+int cmd_subaru_diagnostic(int argc, char *argv[]) {
+    std::optional<std::string> transport_kind;
+    std::string dll_path;
+    std::string device_path;
+    enum class Op { ReadDtcs, ClearDtcs, ControlDtcOn, ControlDtcOff,
+                    None };
+    Op op = Op::None;
+    std::uint8_t status_mask = 0x09;  // ISO 14229: confirmed + pending
+    bool verbose = false;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "subaru-diagnostic: %s requires a "
+                             "value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--transport") {
+            if (auto const *v = require_arg("--transport"); v)
+                transport_kind = std::string{v};
+            else return 2;
+        } else if (a == "--device") {
+            if (auto const *v = require_arg("--device"); v) device_path = v;
+            else return 2;
+        } else if (a == "--dll") {
+            if (auto const *v = require_arg("--dll"); v) dll_path = v;
+            else return 2;
+        } else if (a == "--read-dtcs") {
+            op = Op::ReadDtcs;
+        } else if (a == "--clear-dtcs") {
+            op = Op::ClearDtcs;
+        } else if (a == "--control-dtc") {
+            auto const *v = require_arg("--control-dtc");
+            if (v == nullptr) return 2;
+            std::string_view const vv{v};
+            if (vv == "on") op = Op::ControlDtcOn;
+            else if (vv == "off") op = Op::ControlDtcOff;
+            else {
+                std::fprintf(stderr,
+                             "subaru-diagnostic: --control-dtc must be "
+                             "'on' or 'off' (got '%s')\n", v);
+                return 2;
+            }
+        } else if (a == "--status-mask") {
+            auto const *v = require_arg("--status-mask");
+            if (v == nullptr) return 2;
+            try {
+                status_mask = static_cast<std::uint8_t>(
+                    std::stoul(v, nullptr, 0));
+            } catch (std::exception const &) {
+                std::fprintf(stderr,
+                             "subaru-diagnostic: --status-mask '%s' "
+                             "bad hex\n", v);
+                return 2;
+            }
+        } else if (a == "--verbose") {
+            verbose = true;
+        } else {
+            std::fprintf(stderr, "subaru-diagnostic: unknown option: %s\n",
+                         argv[i]);
+            return 2;
+        }
+    }
+
+    if (!transport_kind.has_value() || op == Op::None) {
+        std::fputs(
+            "subaru-diagnostic — DTC read / clear / control.\n"
+            "\n"
+            "Usage:\n"
+            "  subuwutuner-cli subaru-diagnostic --transport obdx --device COM4 \\\n"
+            "      (--read-dtcs [--status-mask 0x09]\n"
+            "       | --clear-dtcs\n"
+            "       | --control-dtc on|off)\n"
+            "      [--verbose]\n"
+            "\n"
+            "Wires (default session, no SA — round-62 R11 catalog):\n"
+            "  --read-dtcs       19 02 <mask>  → 59 02 <mask>\n"
+            "                                     <pairs of [DTC-3B, status-1B]>\n"
+            "                    Default --status-mask 0x09 = confirmed + pending\n"
+            "                    (ISO 14229 §11.3.1: bit 0 = testFailed,\n"
+            "                    bit 3 = confirmedDTC, bit 0+3 = 0x09).\n"
+            "  --clear-dtcs      04           → 44\n"
+            "  --control-dtc on  85 01 01     → C5 01 01\n"
+            "  --control-dtc off 85 02 01     → C5 02 01\n",
+            stderr);
+        return 2;
+    }
+
+    auto const kind = st::transport::parse_kind(*transport_kind);
+    if (!kind.has_value()) {
+        std::fprintf(stderr,
+                     "subaru-diagnostic: --transport '%s' not recognized\n",
+                     transport_kind->c_str());
+        return 2;
+    }
+    st::transport::TransportSpec const spec{*kind, dll_path, device_path};
+    auto t = st::transport::open_transport(spec);
+    if (!t.has_value()) {
+        std::fprintf(stderr, "subaru-diagnostic: %s\n",
+                     t.error().to_string().c_str());
+        return 1;
+    }
+    if (verbose) st::transport::obdx::set_trace_enabled(true);
+    st::transport::LinkConfig const link{st::transport::LinkKind::CanIso15765,
+                                         500000, 0x000007E0, 0x000007E8};
+    if (auto s = (*t)->open(link); !s.has_value()) {
+        std::fprintf(stderr, "subaru-diagnostic: transport open: %s\n",
+                     s.error().to_string().c_str());
+        return 1;
+    }
+
+    auto send = [&](std::span<std::uint8_t const> req) ->
+        std::optional<std::vector<std::uint8_t>> {
+        auto resp = (*t)->send_recv(req, std::chrono::milliseconds{2000});
+        if (!resp.has_value()) {
+            std::fprintf(stderr, "subaru-diagnostic: %s\n",
+                         resp.error().to_string().c_str());
+            return std::nullopt;
+        }
+        return resp->data;
+    };
+
+    if (op == Op::ReadDtcs) {
+        std::array<std::uint8_t, 3> const req{0x19U, 0x02U, status_mask};
+        auto resp = send(req);
+        if (!resp.has_value()) return 1;
+        auto const &b = *resp;
+        if (b.size() < 3 || b[0] != 0x59U || b[1] != 0x02U) {
+            std::fprintf(stderr,
+                         "subaru-diagnostic: unexpected response (first "
+                         "byte 0x%02X)\n",
+                         b.empty() ? 0xFFU : b[0]);
+            return 1;
+        }
+        std::fprintf(stdout, "Status mask available: 0x%02X\n", b[2]);
+        std::size_t const dtc_count = (b.size() - 3) / 4;
+        std::fprintf(stdout, "DTCs reported: %zu\n", dtc_count);
+        for (std::size_t i = 0; i < dtc_count; ++i) {
+            auto const o = 3 + i * 4;
+            std::uint8_t  const hi   = b[o];
+            std::uint8_t  const mid  = b[o + 1];
+            std::uint8_t  const lo   = b[o + 2];
+            std::uint8_t  const st   = b[o + 3];
+            char prefix;
+            switch ((hi >> 6) & 0x3U) {
+                case 0: prefix = 'P'; break;
+                case 1: prefix = 'C'; break;
+                case 2: prefix = 'B'; break;
+                default: prefix = 'U'; break;
+            }
+            std::fprintf(stdout,
+                         "  %c%X%02X%X  status 0x%02X\n",
+                         prefix, hi & 0x3FU, mid, lo & 0xFU, st);
+            (void)lo;
+        }
+        return 0;
+    }
+
+    if (op == Op::ClearDtcs) {
+        std::array<std::uint8_t, 1> const req{0x04U};
+        auto resp = send(req);
+        if (!resp.has_value()) return 1;
+        if (resp->size() >= 1 && (*resp)[0] == 0x44U) {
+            std::fputs("ClearDTC: OK (44).\n", stdout);
+            return 0;
+        }
+        std::fputs("ClearDTC: unexpected response.\n", stderr);
+        return 1;
+    }
+
+    // ControlDtc on/off
+    std::array<std::uint8_t, 3> const req{
+        0x85U,
+        op == Op::ControlDtcOn  ? static_cast<std::uint8_t>(0x01U)
+                                : static_cast<std::uint8_t>(0x02U),
+        0x01U};
+    auto resp = send(req);
+    if (!resp.has_value()) return 1;
+    if (resp->size() >= 2 && (*resp)[0] == 0xC5U) {
+        std::fprintf(stdout, "ControlDTCSetting %s: OK.\n",
+                     op == Op::ControlDtcOn ? "on" : "off");
+        return 0;
+    }
+    std::fputs("ControlDTCSetting: unexpected response.\n", stderr);
+    return 1;
+}
+
+// cmd_subaru_live_tune — WDBI write to 422 pre-curated DID slots.
+//
+// Round-62 R10 decoded the headline live-tuning surface: SID 0x2E
+// at ROM 0xBFA7C, wire `2E <DID-hi> <DID-lo> <data>`, EXTENDED
+// SESSION (no SA), 422 pre-curated DID slots in 10 ROM dispatch
+// tables targeting `0xFFF8xxxx` RAM. Permission bitmap at RAM
+// `0xFFF9B1C0`.
+//
+// This v0 verb takes wire-level inputs (DID + new value as hex)
+// and optionally reads-back via UDS 0x22. The named-DID lookup
+// (so user can say `--cell rev_limit` instead of `--did F490`) is
+// round-63 analyst work — pending the catalog CSV that joins the
+// 10 WDBI tables with the read-on-demand 162-signal catalog
+// (round-60 R2) via target-address.
+int cmd_subaru_live_tune(int argc, char *argv[]) {
+    std::optional<std::string> transport_kind;
+    std::string dll_path;
+    std::string device_path;
+    std::optional<std::uint16_t> did;
+    std::vector<std::uint8_t> write_bytes;
+    bool read_back = false;
+    bool verbose = false;
+    bool no_dsc  = false;
+
+    auto const parse_hex_bytes = [&](std::string_view s,
+                                     std::vector<std::uint8_t> &out) -> bool {
+        std::string cleaned;
+        for (char c : s)
+            if (c != ' ' && c != '\t') cleaned.push_back(c);
+        if (cleaned.empty() || cleaned.size() % 2 != 0) return false;
+        auto const hex_nibble = [](char c) -> int {
+            if (c >= '0' && c <= '9') return c - '0';
+            if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+            if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+            return -1;
+        };
+        out.clear();
+        for (std::size_t i = 0; i < cleaned.size(); i += 2) {
+            int const hi = hex_nibble(cleaned[i]);
+            int const lo = hex_nibble(cleaned[i + 1]);
+            if (hi < 0 || lo < 0) return false;
+            out.push_back(static_cast<std::uint8_t>((hi << 4) | lo));
+        }
+        return true;
+    };
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "subaru-live-tune: %s requires a "
+                             "value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--transport") {
+            if (auto const *v = require_arg("--transport"); v)
+                transport_kind = std::string{v};
+            else return 2;
+        } else if (a == "--device") {
+            if (auto const *v = require_arg("--device"); v) device_path = v;
+            else return 2;
+        } else if (a == "--dll") {
+            if (auto const *v = require_arg("--dll"); v) dll_path = v;
+            else return 2;
+        } else if (a == "--did") {
+            auto const *v = require_arg("--did");
+            if (v == nullptr) return 2;
+            try {
+                auto const u = std::stoul(v, nullptr, 16);
+                if (u > 0xFFFFUL) return 2;
+                did = static_cast<std::uint16_t>(u);
+            } catch (std::exception const &) {
+                std::fprintf(stderr,
+                             "subaru-live-tune: --did '%s' bad hex\n", v);
+                return 2;
+            }
+        } else if (a == "--write") {
+            auto const *v = require_arg("--write");
+            if (v == nullptr) return 2;
+            if (!parse_hex_bytes(v, write_bytes)) {
+                std::fprintf(stderr,
+                             "subaru-live-tune: --write '%s' bad hex\n", v);
+                return 2;
+            }
+        } else if (a == "--read") {
+            read_back = true;
+        } else if (a == "--no-dsc") {
+            no_dsc = true;
+        } else if (a == "--verbose") {
+            verbose = true;
+        } else {
+            std::fprintf(stderr, "subaru-live-tune: unknown option: %s\n",
+                         argv[i]);
+            return 2;
+        }
+    }
+
+    if (!transport_kind.has_value() || !did.has_value() ||
+        (write_bytes.empty() && !read_back)) {
+        std::fputs(
+            "subaru-live-tune — live RAM write via UDS 0x2E WDBI.\n"
+            "\n"
+            "Usage:\n"
+            "  subuwutuner-cli subaru-live-tune --transport obdx --device COM4 \\\n"
+            "      --did <hex> (--write <hex_bytes> | --read) \\\n"
+            "      [--no-dsc] [--verbose]\n"
+            "\n"
+            "Round-62 R10 unlocked the live-tuning write primitive:\n"
+            "  SID 0x2E (WDBI) targets one of 422 pre-curated DID slots\n"
+            "  across 10 ROM dispatch tables (0x71958 / 0x71B60 / 0x71C18 /\n"
+            "  0x71E78 / 0x72078 / 0x722C8 / 0x723F0 / 0x72450 / 0x724B0 /\n"
+            "  0x724E0). Each slot maps a DID to a target RAM address in\n"
+            "  0xFFF8xxxx. Extended session, no SecurityAccess required.\n"
+            "\n"
+            "Wires:\n"
+            "  --read         22 <DID-hi> <DID-lo>           → 62 ... <data>\n"
+            "  --write <hex>  2E <DID-hi> <DID-lo> <hex>     → 6E ...\n"
+            "\n"
+            "The v0 verb takes DID directly. Symbolic cal-cell lookup\n"
+            "(--cell rev_limit) needs the round-63 analyst catalog CSV.\n"
+            "\n"
+            "DID blacklist (rejected at 0xBFFC0): [0xF300..0xF313],\n"
+            "[0xF200..0xF231]. Other DIDs may also fail if the permission\n"
+            "bitmap at 0xFFF9B1C0 disallows the underlying address.\n",
+            stderr);
+        return 2;
+    }
+
+    auto const kind = st::transport::parse_kind(*transport_kind);
+    if (!kind.has_value()) {
+        std::fprintf(stderr,
+                     "subaru-live-tune: --transport '%s' not recognized\n",
+                     transport_kind->c_str());
+        return 2;
+    }
+    st::transport::TransportSpec const spec{*kind, dll_path, device_path};
+    auto t = st::transport::open_transport(spec);
+    if (!t.has_value()) {
+        std::fprintf(stderr, "subaru-live-tune: %s\n",
+                     t.error().to_string().c_str());
+        return 1;
+    }
+    if (verbose) st::transport::obdx::set_trace_enabled(true);
+    st::transport::LinkConfig const link{st::transport::LinkKind::CanIso15765,
+                                         500000, 0x000007E0, 0x000007E8};
+    if (auto s = (*t)->open(link); !s.has_value()) {
+        std::fprintf(stderr, "subaru-live-tune: transport open: %s\n",
+                     s.error().to_string().c_str());
+        return 1;
+    }
+
+    st::ecu::uds::UdsClient uds{**t};
+
+    if (!no_dsc) {
+        if (auto s = uds.diagnostic_session_control(
+                0x03, std::chrono::milliseconds{2000});
+            !s.has_value()) {
+            std::fprintf(stderr,
+                         "subaru-live-tune: DSC 10 03 failed: %s\n",
+                         s.error().to_string().c_str());
+            return 1;
+        }
+    }
+
+    std::uint8_t const did_hi =
+        static_cast<std::uint8_t>(((*did) >> 8) & 0xFFU);
+    std::uint8_t const did_lo =
+        static_cast<std::uint8_t>((*did) & 0xFFU);
+
+    auto send_wire = [&](std::span<std::uint8_t const> req)
+        -> std::optional<std::vector<std::uint8_t>> {
+        auto resp = (*t)->send_recv(req, std::chrono::milliseconds{2000});
+        if (!resp.has_value()) {
+            std::fprintf(stderr, "subaru-live-tune: %s\n",
+                         resp.error().to_string().c_str());
+            return std::nullopt;
+        }
+        return resp->data;
+    };
+
+    if (!write_bytes.empty()) {
+        std::vector<std::uint8_t> req;
+        req.reserve(3 + write_bytes.size());
+        req.push_back(0x2EU);
+        req.push_back(did_hi);
+        req.push_back(did_lo);
+        for (auto b : write_bytes) req.push_back(b);
+        auto resp = send_wire(req);
+        if (!resp.has_value()) return 1;
+        auto const &b = *resp;
+        if (b.size() >= 3 && b[0] == 0x6EU && b[1] == did_hi &&
+            b[2] == did_lo) {
+            std::fprintf(stdout,
+                         "WDBI 0x%04X ← %zu bytes: OK (6E echo).\n",
+                         static_cast<unsigned>(*did),
+                         write_bytes.size());
+        } else if (b.size() >= 3 && b[0] == 0x7FU && b[1] == 0x2EU) {
+            std::fprintf(stderr,
+                         "WDBI 0x%04X: NRC 0x%02X\n",
+                         static_cast<unsigned>(*did), b[2]);
+            return 1;
+        } else {
+            std::fputs("WDBI: unexpected response.\n", stderr);
+            return 1;
+        }
+    }
+
+    if (read_back) {
+        std::array<std::uint8_t, 3> const req{0x22U, did_hi, did_lo};
+        auto resp = send_wire(req);
+        if (!resp.has_value()) return 1;
+        auto const &b = *resp;
+        if (b.size() >= 3 && b[0] == 0x62U && b[1] == did_hi &&
+            b[2] == did_lo) {
+            std::fprintf(stdout, "RDBI 0x%04X:", static_cast<unsigned>(*did));
+            for (std::size_t i = 3; i < b.size(); ++i)
+                std::fprintf(stdout, " %02X", b[i]);
+            std::fputc('\n', stdout);
+        } else if (b.size() >= 3 && b[0] == 0x7FU && b[1] == 0x22U) {
+            std::fprintf(stderr,
+                         "RDBI 0x%04X: NRC 0x%02X\n",
+                         static_cast<unsigned>(*did), b[2]);
+            return 1;
+        } else {
+            std::fputs("RDBI: unexpected response.\n", stderr);
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 namespace {
 
 // Tiny boilerplate helper for the diagnostic verbs (Mode 01/03/04).
@@ -29239,6 +29670,12 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "subaru-passive-log") {
         return cmd_subaru_passive_log(argc - 2, argv + 2);
+    }
+    if (cmd == "subaru-diagnostic") {
+        return cmd_subaru_diagnostic(argc - 2, argv + 2);
+    }
+    if (cmd == "subaru-live-tune") {
+        return cmd_subaru_live_tune(argc - 2, argv + 2);
     }
     if (cmd == "subaru-mode1-probe") {
         return cmd_subaru_mode1_probe(argc - 2, argv + 2);
