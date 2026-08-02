@@ -20,6 +20,7 @@ target_link_libraries(subuwutuner-cli
         st::autotune
         st::feature
         st::feature_codegen
+        st::feature_patch
         st::diff
         st::audit
         st::profile

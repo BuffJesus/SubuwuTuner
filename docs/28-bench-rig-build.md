@@ -62,8 +62,8 @@ Before powering anything, gather:
   brownouts during programming).
 - **Ignition switch** — any SPST toggle wired between battery+ and
   the ECU's ignition input (B134-32).
-- **OBDX Pro VX adapter** (in hand 2026-05-24; COM5 on the development
-  Windows host per memory).
+- **OBDX Pro VX adapter** (in hand; the current Windows host enumerates it
+  as COM3 — verify with `Get-PnpDevice -Class Ports` before each session).
 - **Multimeter** with continuity, DC volts to 20V, and ideally
   capacitance.
 - **CAN termination resistor** — 120 Ω across CAN-H/CAN-L if the
@@ -185,6 +185,21 @@ bench-rig boot failures that look like dead silicon but aren't.
 
 Goal: SubuwuTuner reads the CAL ID off the bench ECU via OBD-II Mode 0x09.
 
+**Bench checkpoint 2026-08-02:** the OBDX Pro VX enumerates as **COM3**.
+Its ELM/DVI handshake, CAN-filter setup, and listen-only network enable all
+complete successfully. A 5-second passive capture recorded **0 CAN frames**,
+and the active CAL-ID request timed out with no ECU response. The ECU is now
+reported bricked, so treat this as consistent with a boot-integrity halt rather
+than a normal Phase 3 wiring/software issue. Stop active OBD attempts and follow
+[the JTAG recovery procedure](43-jtag-recovery.md); `flash-resume` is applicable
+only after UDS becomes reachable again.
+
+**Power-cycle follow-up 2026-08-02:** the ECU has been power-cycled after the
+zero-frame/no-response result. This is logged as a recovery attempt, but no
+new CAN or UDS success has been established from the power-cycle alone. The
+JTAG branch remains the next step; preserve the current flash state before
+any erase or programming action.
+
 ### Pins to wire
 
 Subaru uses non-ISO-standard CAN colors here — don't assume Yellow/Green from generic CAN guides.
@@ -203,12 +218,13 @@ OBDX end — the ECU itself has 120 Ω built in.
 
 ### First exchange
 
-With the OBDX adapter plugged in on Windows (COM5 per current setup),
+With the OBDX adapter plugged in on Windows (COM3 observed on the current
+host; verify the port before each session),
 power-cycle the bench ECU (ignition off → on) and ask the ECU for its
 calibration ID via OBD-II Mode 0x09:
 
 ```powershell
-subuwutuner-cli.exe obd-info --transport obdx --device COM5 --pid cal-id
+subuwutuner-cli.exe obd-info --transport obdx --device COM3 --pid cal-id
 ```
 
 Expected output: a 16-byte ASCII CAL ID string (e.g. `LF79102P` for a
@@ -221,7 +237,8 @@ VIN.
 If `obd-info` fails:
 - **No `>` prompt from ELM probe**: OBDX adapter isn't seeing the bus.
   Check CAN-H/L wiring, check 120 Ω termination, check that the OBDX
-  is actually on COM5 (`Get-PnpDevice -Class Ports`).
+  is actually on COM3 (or the port reported by
+  `Get-PnpDevice -Class Ports`).
 - **ELM probe OK, SetProtocol fails**: ECU is on the bus but not
   responding. Verify the bench ECU is fully booted (Phase 2 success
   criteria) and CAN-H/L aren't swapped (B134-10 Red → CAN-H, B134-9
@@ -263,7 +280,7 @@ Goal: full 2 MB plaintext ROM image off the bench ECU.
 
 ```powershell
 subuwutuner-cli.exe rom-pull `
-    --transport obdx --device COM5 `
+    --transport obdx --device COM3 `
     --sa-variant factory `
     --addr 0x0 --size 0x200000 `
     --output "D:\Subuwu\subaru-data\reference-dumps\bench-junkyard-stock.bin"

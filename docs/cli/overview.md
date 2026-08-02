@@ -56,6 +56,7 @@ subuwutuner-cli doctor
 | Subcommand | What it does |
 |---|---|
 | `feature-compile` | Compile a `.stmod` node graph to a ROM patch (SH-2A or RH850) |
+| `feature-flash` | Insert a `.stmod` into a source ROM and emit a policy-gated `FlashPlan` |
 
 ### CAN reverse-engineering
 

@@ -22,7 +22,10 @@
 #include "st/feature.hpp"
 #include "st/feature_codegen.hpp"
 #include "st/feature_ir.hpp"
+#include "st/feature_patch/flash_bridge.hpp"
+#include "st/feature_patch/inserter.hpp"
 #include "st/flash.hpp"
+#include "st/flash/boot_signatures.hpp"
 #include "st/flash/checksum.hpp"
 #include "st/log.hpp"
 #include "st/ai/backend.hpp"
@@ -473,7 +476,10 @@ constexpr std::string_view kUsage =
     "                            plan is hand-editable before execution. --layout\n"
     "                            selects a known per-platform sector geometry instead of\n"
     "                            a uniform --sector-size (e.g. fa-dit-sh2a-2mb for the\n"
-    "                            VA/VB WRX 2 MB FA-DIT mixed 8K/64K/128K map).\n"
+    "                            VA/VB WRX 2 MB FA-DIT mixed 8K/64K/128K map). In\n"
+    "                            layout mode, boot signatures are preflighted, changes\n"
+    "                            outside the declared map are refused, and the final\n"
+    "                            signature sector is ordered last.\n"
     "    flash-resume <ORIGINAL.plan.toml> <JOURNAL.manifest.toml>\n"
     "                [--output <resumed.plan.toml>]\n"
     "                            Given the plan from a partial-flash attempt and the\n"
@@ -729,7 +735,21 @@ constexpr std::string_view kUsage =
     "                            exits 0 (success) or non-zero (failure) without\n"
     "                            producing output — for CI / pre-commit hooks that\n"
     "                            want to confirm a .stmod still builds against a\n"
-    "                            pack without leaving artifacts behind.\n";
+    "                            pack without leaving artifacts behind.\n"
+    "    feature-flash <FILE.stmod> --def <pack.toml> --source <ROM.bin>\n"
+    "                    [--arch sh2a|rh850] [--output <ROM.bin>]\n"
+    "                    [--plan <FILE.toml>] [--trace <FILE.uds>]\n"
+    "                    [--profile <P>] [--confirm] [--reason \"…\"]\n"
+    "                    [--sector-size <N>] [--base-address <addr>]\n"
+    "                    [--integrity-check-offset <addr>] [--manifest <FILE.toml>]\n"
+    "                            Compile and insert a .stmod into a source ROM,\n"
+    "                            repair the pack-declared checksum, and build a\n"
+    "                            normal FlashPlan. With --trace, execute that\n"
+    "                            plan through MockTransport for hardware-free\n"
+    "                            validation. Without --trace, this command never\n"
+    "                            contacts an adapter; pass the emitted --plan to\n"
+    "                            flash-apply for the explicitly confirmed live\n"
+    "                            hardware step.\n";
 
 void print_version() {
     std::printf("%.*s %.*s\n", static_cast<int>(st::Version::name().size()),
@@ -11848,6 +11868,36 @@ int cmd_flash_delta(int argc, char *argv[]) {
                      tgt->size());
         return 1;
     }
+    if (layout_name.has_value()) {
+        auto const &layout = st::flash::layouts::kFaDitSh2a2Mb;
+        auto const &last = layout.back();
+        auto const layout_end = static_cast<std::size_t>(last.address) + last.length;
+        if (src->size() < layout_end) {
+            std::fprintf(stderr,
+                         "flash-delta: --layout %s requires an image of at least 0x%zX "
+                         "bytes (got 0x%zX)\n",
+                         layout_name->c_str(), layout_end, src->size());
+            return 1;
+        }
+        auto const source_sig = st::flash::verify_boot_signatures_sh2a_2mb(src->data());
+        if (!source_sig.ok()) {
+            auto const name = st::flash::boot_signature_failure_name(source_sig.failure);
+            std::fprintf(stderr,
+                         "flash-delta: REFUSED: source ROM boot-signature preflight failed "
+                         "(%.*s)\n",
+                         static_cast<int>(name.size()), name.data());
+            return 3;
+        }
+        auto const target_sig = st::flash::verify_boot_signatures_sh2a_2mb(tgt->data());
+        if (!target_sig.ok()) {
+            auto const name = st::flash::boot_signature_failure_name(target_sig.failure);
+            std::fprintf(stderr,
+                         "flash-delta: REFUSED: target ROM boot-signature preflight failed "
+                         "(%.*s)\n",
+                         static_cast<int>(name.size()), name.data());
+            return 3;
+        }
+    }
     std::vector<st::flash::Sector> sectors;
     std::size_t gap_bytes_changed = 0;
     if (layout_name.has_value()) {
@@ -11861,6 +11911,11 @@ int cmd_flash_delta(int argc, char *argv[]) {
     }
 
     st::flash::FlashPlan plan;
+    if (layout_name.has_value()) {
+        // Keep the high boot signature invalid until every other changed
+        // sector is complete. Flasher::execute() honors this ordering field.
+        plan.integrity_check_offset = st::flash::kBootSigBOffset;
+    }
     plan.writes.reserve(sectors.size());
     for (auto const &s : sectors) {
         st::flash::SectorWrite sw;
@@ -11875,10 +11930,12 @@ int cmd_flash_delta(int argc, char *argv[]) {
     }
     if (gap_bytes_changed > 0) {
         std::fprintf(stderr,
-                     "flash-delta: WARNING: %zu byte(s) differ in regions outside the '%s' "
-                     "layout — these will NOT be flashed. Check for unintended edits in "
-                     "FCU-locked or undeclared regions.\n",
+                     "flash-delta: REFUSED: %zu byte(s) differ in regions outside the '%s' "
+                     "layout. Delta mode will not emit a partial plan that silently omits "
+                     "FCU-locked or undeclared changes. Use a full-reflash workflow after "
+                     "reviewing the source/target pair.\n",
                      gap_bytes_changed, layout_name->c_str());
+        return 3;
     }
 
     if (output_path.has_value()) {
@@ -24901,6 +24958,345 @@ std::string render_patch_hex(st::feature::codegen::PatchObject const &p) {
 
 } // namespace
 
+int cmd_feature_flash(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> stmod_path;
+    std::optional<std::filesystem::path> def_path;
+    std::optional<std::filesystem::path> source_path;
+    std::optional<std::filesystem::path> output_path;
+    std::optional<std::filesystem::path> plan_path;
+    std::optional<std::filesystem::path> trace_path;
+    std::optional<std::filesystem::path> manifest_path;
+    std::optional<std::filesystem::path> journal_path;
+    std::optional<std::string> arch_override;
+    std::optional<std::string> profile_arg;
+    std::optional<std::string> reason;
+    std::optional<std::uint32_t> integrity_check_offset;
+    std::uint32_t sector_size = 0x1000;
+    std::uint32_t base_address = 0;
+    bool confirm = false;
+    bool dry_run = false;
+
+    auto const parse_uint = [](char const *raw, std::uint32_t &out) -> bool {
+        std::string_view sv{raw};
+        int base = 10;
+        if (sv.starts_with("0x") || sv.starts_with("0X")) {
+            sv.remove_prefix(2);
+            base = 16;
+        }
+        auto const r = std::from_chars(sv.data(), sv.data() + sv.size(), out, base);
+        return r.ec == std::errc{} && r.ptr == sv.data() + sv.size();
+    };
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "feature-flash: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--def") {
+            if (auto const *v = require_arg("--def"); v)
+                def_path = std::filesystem::path{v};
+            else
+                return 2;
+        } else if (a == "--source") {
+            if (auto const *v = require_arg("--source"); v)
+                source_path = std::filesystem::path{v};
+            else
+                return 2;
+        } else if (a == "--output") {
+            if (auto const *v = require_arg("--output"); v)
+                output_path = std::filesystem::path{v};
+            else
+                return 2;
+        } else if (a == "--plan") {
+            if (auto const *v = require_arg("--plan"); v)
+                plan_path = std::filesystem::path{v};
+            else
+                return 2;
+        } else if (a == "--trace") {
+            if (auto const *v = require_arg("--trace"); v)
+                trace_path = std::filesystem::path{v};
+            else
+                return 2;
+        } else if (a == "--manifest") {
+            if (auto const *v = require_arg("--manifest"); v)
+                manifest_path = std::filesystem::path{v};
+            else
+                return 2;
+        } else if (a == "--journal") {
+            if (auto const *v = require_arg("--journal"); v)
+                journal_path = std::filesystem::path{v};
+            else
+                return 2;
+        } else if (a == "--arch") {
+            if (auto const *v = require_arg("--arch"); v)
+                arch_override = std::string{v};
+            else
+                return 2;
+        } else if (a == "--profile") {
+            if (auto const *v = require_arg("--profile"); v)
+                profile_arg = std::string{v};
+            else
+                return 2;
+        } else if (a == "--reason") {
+            if (auto const *v = require_arg("--reason"); v)
+                reason = std::string{v};
+            else
+                return 2;
+        } else if (a == "--sector-size") {
+            auto const *v = require_arg("--sector-size");
+            if (v == nullptr)
+                return 2;
+            if (!parse_uint(v, sector_size) || sector_size == 0) {
+                std::fputs("feature-flash: --sector-size must be a positive integer\n", stderr);
+                return 2;
+            }
+        } else if (a == "--base-address") {
+            auto const *v = require_arg("--base-address");
+            if (v == nullptr || !parse_uint(v, base_address)) {
+                std::fputs("feature-flash: --base-address must be a 32-bit integer\n", stderr);
+                return 2;
+            }
+        } else if (a == "--integrity-check-offset") {
+            auto const *v = require_arg("--integrity-check-offset");
+            std::uint32_t parsed = 0;
+            if (v == nullptr || !parse_uint(v, parsed)) {
+                std::fputs("feature-flash: --integrity-check-offset must be a 32-bit integer\n",
+                           stderr);
+                return 2;
+            }
+            integrity_check_offset = parsed;
+        } else if (a == "--confirm") {
+            confirm = true;
+        } else if (a == "--dry-run") {
+            dry_run = true;
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "feature-flash: unknown option: %s\n", argv[i]);
+            return 2;
+        } else if (!stmod_path.has_value()) {
+            stmod_path = std::filesystem::path{argv[i]};
+        } else {
+            std::fprintf(stderr, "feature-flash: unexpected positional '%s'\n", argv[i]);
+            return 2;
+        }
+    }
+
+    if (!stmod_path.has_value() || !def_path.has_value() || !source_path.has_value()) {
+        std::fputs("feature-flash: required arguments are missing\n"
+                   "Usage: subuwutuner-cli feature-flash <FILE.stmod> "
+                   "--def <pack.toml> --source <ROM.bin>\n"
+                   "       [--arch sh2a|rh850] [--output <ROM.bin>] "
+                   "[--plan <FILE.toml>] [--trace <FILE.uds>]\n"
+                   "       [--profile <P>] [--confirm] [--reason \"…\"] "
+                   "[--dry-run]\n",
+                   stderr);
+        return 2;
+    }
+    if (manifest_path.has_value() && !trace_path.has_value()) {
+        std::fputs("feature-flash: --manifest requires --trace so an execution "
+                   "report exists\n",
+                   stderr);
+        return 2;
+    }
+
+    auto const def = st::Definition::from_file(resolve_def_path(*def_path));
+    if (!def.has_value())
+        return print_def_load_error("feature-flash", *def_path, def.error());
+    auto source = st::Rom::from_file(*source_path);
+    if (!source.has_value()) {
+        std::fprintf(stderr, "feature-flash: %s\n", source.error().to_string().c_str());
+        return 1;
+    }
+
+    std::ifstream ifs{*stmod_path, std::ios::binary};
+    if (!ifs) {
+        std::fprintf(stderr, "feature-flash: cannot open '%s'\n", stmod_path->string().c_str());
+        return 1;
+    }
+    std::stringstream stmod_buf;
+    stmod_buf << ifs.rdbuf();
+    auto graph = st::feature::from_toml(stmod_buf.str());
+    if (!graph.has_value()) {
+        std::fprintf(stderr, "feature-flash: parse failed: %s\n",
+                     graph.error().to_string().c_str());
+        return 1;
+    }
+    auto module = st::feature::ir::lower(*graph);
+    if (!module.has_value()) {
+        std::fprintf(stderr, "feature-flash: lowering failed: %s\n",
+                     module.error().to_string().c_str());
+        return 1;
+    }
+
+    std::unique_ptr<st::feature::codegen::IBackend> backend;
+    if (arch_override.has_value()) {
+        std::string arch = *arch_override;
+        std::transform(arch.begin(), arch.end(), arch.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        if (arch == "sh2a") {
+            backend = std::make_unique<st::feature::codegen::Sh2aBackend>();
+        } else if (arch == "rh850") {
+            backend = std::make_unique<st::feature::codegen::Rh850Backend>();
+        } else {
+            std::fprintf(stderr, "feature-flash: --arch must be sh2a or rh850 (got '%s')\n",
+                         arch_override->c_str());
+            return 2;
+        }
+    } else {
+        auto selected = st::feature::codegen::select_backend(*def);
+        if (!selected.has_value()) {
+            std::fprintf(stderr, "feature-flash: %s\n", selected.error().to_string().c_str());
+            return 1;
+        }
+        backend = std::move(*selected);
+    }
+
+    auto patch = backend->compile(*module, *def);
+    if (!patch.has_value()) {
+        std::fprintf(stderr, "feature-flash: compile failed: %s\n",
+                     patch.error().to_string().c_str());
+        return 1;
+    }
+
+    std::vector<st::feature_patch::RomRegion> regions;
+    for (auto const &region : def->writable_regions()) {
+        if (region.kind == "code") {
+            if (region.address > std::numeric_limits<std::uint32_t>::max() ||
+                region.length > std::numeric_limits<std::uint32_t>::max()) {
+                std::fprintf(stderr, "feature-flash: writable code region '%s' exceeds 32-bit "
+                                     "flash address space\n",
+                             region.name.c_str());
+                return 1;
+            }
+            regions.push_back({region.name, static_cast<std::uint32_t>(region.address),
+                               static_cast<std::uint32_t>(region.length)});
+        }
+    }
+    if (regions.empty()) {
+        std::fputs("feature-flash: definition has no [[writable_region]] with kind = \"code\"\n",
+                   stderr);
+        return 1;
+    }
+
+    std::vector<std::uint8_t> source_bytes{source->data().begin(), source->data().end()};
+    auto patched = st::feature_patch::apply(*patch, std::move(source_bytes), std::move(regions));
+    if (!patched.has_value()) {
+        std::fprintf(stderr, "feature-flash: patch insertion failed: %s\n",
+                     patched.error().to_string().c_str());
+        return 1;
+    }
+    if (auto status = st::flash::apply_checksum_repair(patched->bytes, *def);
+        !status.has_value()) {
+        std::fprintf(stderr, "feature-flash: checksum repair failed: %s\n",
+                     status.error().to_string().c_str());
+        return 1;
+    }
+
+    auto plan = st::feature_patch::build_flash_plan(
+        std::vector<std::uint8_t>{source->data().begin(), source->data().end()}, *patched,
+        sector_size, base_address);
+    if (!plan.has_value()) {
+        std::fprintf(stderr, "feature-flash: plan construction failed: %s\n",
+                     plan.error().to_string().c_str());
+        return 1;
+    }
+    plan->dry_run = dry_run;
+    plan->journal_path = journal_path.value_or(std::filesystem::path{});
+    if (integrity_check_offset.has_value())
+        plan->integrity_check_offset = *integrity_check_offset;
+
+    auto profile = st::policy::Profile::MotorsportOnly;
+    if (profile_arg.has_value()) {
+        auto parsed = st::policy::parse_profile(*profile_arg);
+        if (!parsed.has_value()) {
+            std::fprintf(stderr, "feature-flash: unknown profile '%s'\n", profile_arg->c_str());
+            return 2;
+        }
+        profile = *parsed;
+    }
+    if (auto rc = run_policy_gate("feature-flash", *plan, *def, source->data(), profile,
+                                  confirm, reason);
+        rc != 0) {
+        return rc;
+    }
+
+    if (output_path.has_value()) {
+        std::ofstream ofs{*output_path, std::ios::binary | std::ios::trunc};
+        if (!ofs) {
+            std::fprintf(stderr, "feature-flash: cannot open '%s' for writing\n",
+                         output_path->string().c_str());
+            return 1;
+        }
+        ofs.write(reinterpret_cast<char const *>(patched->bytes.data()),
+                  static_cast<std::streamsize>(patched->bytes.size()));
+        if (!ofs) {
+            std::fprintf(stderr, "feature-flash: write to '%s' failed\n",
+                         output_path->string().c_str());
+            return 1;
+        }
+    }
+    if (plan_path.has_value()) {
+        if (auto status = st::flash::write_plan(*plan_path, *plan); !status.has_value()) {
+            std::fprintf(stderr, "feature-flash: %s\n", status.error().to_string().c_str());
+            return 1;
+        }
+    }
+
+    std::size_t const changed_bytes = std::accumulate(
+        plan->writes.begin(), plan->writes.end(), std::size_t{0},
+        [](std::size_t total, auto const &write) { return total + write.data.size(); });
+    std::printf("feature-flash: prepared %zu sector(s), %zu changed byte(s), %zu manifest record(s)\n",
+                plan->writes.size(), changed_bytes, patched->manifest.size());
+    if (output_path.has_value())
+        std::printf("feature-flash: wrote patched ROM %s\n", output_path->string().c_str());
+    if (plan_path.has_value())
+        std::printf("feature-flash: wrote flash plan %s\n", plan_path->string().c_str());
+
+    if (!trace_path.has_value()) {
+        std::printf("feature-flash: preview only; no transport contacted.\n");
+        return 0;
+    }
+
+    std::vector<UdsTracePair> pairs;
+    std::string trace_error;
+    if (!parse_uds_trace(*trace_path, pairs, trace_error)) {
+        std::fputs(trace_error.c_str(), stderr);
+        std::fputc('\n', stderr);
+        return 1;
+    }
+    st::transport::MockTransport mock;
+    if (auto status = mock.open({}); !status.has_value()) {
+        std::fprintf(stderr, "feature-flash: mock open failed: %s\n",
+                     status.error().to_string().c_str());
+        return 1;
+    }
+    for (auto &pair : pairs)
+        mock.expect_send_recv(std::move(pair.request), std::move(pair.response));
+
+    st::flash::Flasher flasher{mock};
+    auto const outcome = flasher.execute(*plan);
+    print_flash_report("feature-flash", outcome);
+    if (!mock.exhausted()) {
+        std::fprintf(stderr, "feature-flash: warning: %zu trace entries unused\n",
+                     mock.remaining());
+    }
+    if (manifest_path.has_value()) {
+        auto manifest = st::flash::build_manifest(*plan, st::flash::format_plan(*plan), outcome.report);
+        manifest.policy_profile = std::string{st::policy::profile_name(profile)};
+        if (reason.has_value())
+            manifest.policy_reason = *reason;
+        if (auto status = st::flash::write_manifest(*manifest_path, manifest); !status.has_value()) {
+            std::fprintf(stderr, "feature-flash: %s\n", status.error().to_string().c_str());
+            return 1;
+        }
+    }
+    return outcome.ok() ? 0 : 1;
+}
+
 int cmd_feature_compile(int argc, char *argv[]) {
     std::optional<std::filesystem::path> stmod_path;
     std::optional<std::filesystem::path> def_path;
@@ -30638,6 +31034,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "feature-compile") {
         return cmd_feature_compile(argc - 2, argv + 2);
+    }
+    if (cmd == "feature-flash") {
+        return cmd_feature_flash(argc - 2, argv + 2);
     }
     if (cmd == "ap3") {
         return cmd_ap3(argc - 2, argv + 2);
