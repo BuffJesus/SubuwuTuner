@@ -443,7 +443,9 @@ try {
         # Suggested edits: seed the auto-tune knock modal from this log.
         Invoke-RelativeClick $process 178 502 # "Suggest timing pull from this log ->"
         $captures += Save-WindowScreenshot $process "03c-autotune-seeded"
-        Invoke-KeyChord $process ([byte[]](0x1B)) # close the seeded modal
+        Invoke-RelativeClick $process 449 630 # Run preview (debug)
+        $captures += Save-WindowScreenshot $process "03d-autotune-proposals"
+        Invoke-RelativeClick $process 591 679 # Close
         # Log -> tune: "Open in Tune" on the knock finding jumps to the Tune
         # workspace, selects the ignition table, and highlights the cell at
         # the finding's rpm/load.

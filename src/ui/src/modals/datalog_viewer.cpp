@@ -932,6 +932,10 @@ void render_log_explorer_panel(AppState &app_state) {
                                 itbl != nullptr && itbl->axis_x.has_value() &&
                                 contains_case_insensitive(*itbl->axis_x, "rpm");
                             app_state.kp_at_rpm_axis_kind = rpm_on_x ? 1 : 0;
+                            // The finding already confirmed sustained knock, so
+                            // seed a low per-cell sample floor to surface the
+                            // per-cell pulls; the user can raise it in the modal.
+                            app_state.kp_at_min_samples = 5;
                             app_state.kp_at_result.reset();
                             app_state.kp_at_lints.clear();
                             app_state.kp_at_table_data.reset();

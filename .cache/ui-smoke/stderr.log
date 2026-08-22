@@ -1,0 +1,7 @@
+[kp-debug] total=29 after_gates=29 rows=3 cols=4
+[kp-debug] cell 0: n=4 mean=0.000 cur=73.50 prop=73.50 pulled=0
+[kp-debug] cell 1: n=1 mean=0.000 cur=73.50 prop=73.50 pulled=0
+[kp-debug] cell 5: n=2 mean=0.000 cur=73.50 prop=73.50 pulled=0
+[kp-debug] cell 7: n=1 mean=0.000 cur=73.50 prop=73.50 pulled=0
+[kp-debug] cell 10: n=2 mean=0.000 cur=73.50 prop=73.50 pulled=0
+[kp-debug] cell 11: n=19 mean=-1.732 cur=73.50 prop=72.75 pulled=1

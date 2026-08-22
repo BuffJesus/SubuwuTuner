@@ -121,9 +121,12 @@ std::optional<std::string> run_knock_pull_preview(AppState &state) {
 
     state.kp_at_result = std::move(*result);
     state.kp_at_lints = std::move(lints);
-    state.kp_at_table_data = std::move(*td);
+    // Copy the axis values BEFORE moving td — rpm_axis/load_axis are references
+    // into td, so moving it first would leave them dangling (moved-from empty),
+    // which made the ledger header render all-zero axis labels.
     state.kp_at_rpm_axis_values.assign(rpm_axis.begin(), rpm_axis.end());
     state.kp_at_load_axis_values.assign(load_axis.begin(), load_axis.end());
+    state.kp_at_table_data = std::move(*td);
     return std::nullopt;
 }
 
