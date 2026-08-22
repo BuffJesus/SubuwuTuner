@@ -520,6 +520,74 @@ std::optional<std::string> resolve_finding_table(st::Definition const &def,
     return std::nullopt;
 }
 
+// Write a knock-pull-format CSV (the columns read_knock_samples_csv wants:
+// rpm, load, feedback_knock, coolant_c, iat_c) from the loaded datalog so the
+// existing autotune-knock modal can consume it. `feedback_knock` is the worst
+// (most negative) feedback-knock cylinder per row; coolant/iat come from the
+// log when present, else gate-passing defaults. Returns false when the log
+// lacks the rpm/load/feedback-knock channels the kernel needs.
+bool write_knock_csv_from_datalog(State const &s, std::filesystem::path const &out) {
+    namespace la = st::library::log_analysis;
+    std::vector<std::size_t> fbkc_cols;
+    std::optional<std::size_t> rpm_col;
+    std::optional<std::size_t> load_col;
+    for (auto const &c : s.analysis.channels) {
+        if (c.role == la::Role::FeedbackKnock) {
+            fbkc_cols.push_back(c.column);
+        } else if (c.role == la::Role::Rpm && !rpm_col.has_value()) {
+            rpm_col = c.column;
+        } else if (c.role == la::Role::Load && !load_col.has_value()) {
+            load_col = c.column;
+        }
+    }
+    if (fbkc_cols.empty() || !rpm_col.has_value() || !load_col.has_value()) {
+        return false;
+    }
+    // Thermal channels are not part of the log_analysis role set — scan headers.
+    std::optional<std::size_t> clt_col;
+    std::optional<std::size_t> iat_col;
+    for (std::size_t i = 0; i < s.dl.headers.size(); ++i) {
+        auto const &h = s.dl.headers[i];
+        if (!clt_col.has_value() &&
+            (contains_case_insensitive(h, "coolant") || contains_case_insensitive(h, "ect"))) {
+            clt_col = i;
+        }
+        if (!iat_col.has_value() &&
+            (contains_case_insensitive(h, "iat") || contains_case_insensitive(h, "intake_air"))) {
+            iat_col = i;
+        }
+    }
+    std::ofstream f{out, std::ios::binary | std::ios::trunc};
+    if (!f) {
+        return false;
+    }
+    f << "rpm,load,feedback_knock,coolant_c,iat_c\n";
+    auto cell = [&](std::optional<std::size_t> col, std::size_t r, double fallback) -> double {
+        if (!col.has_value()) {
+            return fallback;
+        }
+        float const v = s.dl.data[*col][r];
+        return std::isnan(v) ? fallback : static_cast<double>(v);
+    };
+    for (std::size_t r = 0; r < s.dl.row_count; ++r) {
+        float const rpm = s.dl.data[*rpm_col][r];
+        float const load = s.dl.data[*load_col][r];
+        if (std::isnan(rpm) || std::isnan(load)) {
+            continue;
+        }
+        double worst = 0.0; // worst (most negative) feedback knock across cylinders
+        for (auto const col : fbkc_cols) {
+            float const v = s.dl.data[col][r];
+            if (!std::isnan(v) && static_cast<double>(v) < worst) {
+                worst = static_cast<double>(v);
+            }
+        }
+        f << rpm << ',' << load << ',' << worst << ',' << cell(clt_col, r, 90.0) << ','
+          << cell(iat_col, r, 30.0) << '\n';
+    }
+    return static_cast<bool>(f);
+}
+
 void trace_sample_to_table(State &s, AppState &app_state) {
     if (!app_state.project.has_value() || !app_state.current_table_data.has_value() ||
         app_state.selected_table_id.empty()) {
@@ -830,6 +898,57 @@ void render_log_explorer_panel(AppState &app_state) {
                 }
                 ImGui::Unindent();
                 ImGui::Spacing();
+            }
+            // Suggested edits: turn the log's feedback-knock into per-cell
+            // timing-pull proposals on the ignition table via the existing
+            // auto-tune knock modal (seeded from a temp knock-format CSV).
+            if (app_state.project.has_value()) {
+                bool has_fbkc = false;
+                for (auto const &c : s.analysis.channels) {
+                    if (c.role == la::Role::FeedbackKnock) {
+                        has_fbkc = true;
+                        break;
+                    }
+                }
+                auto const ign =
+                    resolve_finding_table(app_state.project->definition(), "knock.feedback");
+                if (has_fbkc && ign.has_value()) {
+                    if (ImGui::Button("Suggest timing pull from this log \xE2\x86\x92"
+                                      "##la_knock_autotune")) {
+                        auto const tmp =
+                            std::filesystem::temp_directory_path() / "subuwu_knock_seed.csv";
+                        if (write_knock_csv_from_datalog(s, tmp)) {
+                            std::snprintf(app_state.kp_at_table_id,
+                                          sizeof app_state.kp_at_table_id, "%s", ign->c_str());
+                            std::snprintf(app_state.kp_at_log_path,
+                                          sizeof app_state.kp_at_log_path, "%s",
+                                          tmp.string().c_str());
+                            // Orient the RPM axis from the resolved table so the
+                            // kernel bins samples on the right axis (0 = rpm on
+                            // Y / default Subaru, 1 = rpm on X).
+                            auto const *itbl =
+                                app_state.project->definition().find_table(*ign);
+                            bool const rpm_on_x =
+                                itbl != nullptr && itbl->axis_x.has_value() &&
+                                contains_case_insensitive(*itbl->axis_x, "rpm");
+                            app_state.kp_at_rpm_axis_kind = rpm_on_x ? 1 : 0;
+                            app_state.kp_at_result.reset();
+                            app_state.kp_at_lints.clear();
+                            app_state.kp_at_table_data.reset();
+                            app_state.show_kp_autotune_modal = true;
+                            s.session_message = "Seeded auto-tune knock pull from this log \xE2\x80\x94 "
+                                                "review the proposed timing pulls.";
+                        } else {
+                            s.session_message = "Could not build knock samples from this log.";
+                        }
+                    }
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::SetTooltip(
+                            "Convert this log's feedback-knock into per-cell timing-pull\n"
+                            "proposals on the ignition table (opens the auto-tune modal).");
+                    }
+                    ImGui::Spacing();
+                }
             }
             text_subtle("Resolved %zu tuning channel(s) by name. Thresholds are conservative "
                         "defaults; use the plots and range stats to confirm.",

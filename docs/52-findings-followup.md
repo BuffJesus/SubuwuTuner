@@ -70,6 +70,19 @@ reflects what is wired in the current tree.
   map-cell trace. A knock event in the datalog now takes the tuner straight to
   the ignition-timing cell where it happened. The demo pack gained an ignition
   timing table so the loop is demonstrable end-to-end. Verified live.
+- `[x]` **Suggested edits from findings (log -> auto-tune).** The Tuning-analysis
+  section has a "Suggest timing pull from this log" action that converts the
+  loaded datalog into the knock-pull kernel's CSV format (worst feedback-knock
+  per row, thermal channels from the log or gate-passing defaults), resolves
+  the ignition table, and opens the existing auto-tune knock modal fully seeded
+  (target table + log + RPM-axis orientation). Verified live: one click opens
+  the modal with `ignition_timing_primary` + the converted log; the pipeline
+  runs through the sample gates. NOTE: on the small synthetic demo log the
+  proposal count is 0 (the per-cell mean knock stays above the default -1.5deg
+  trigger, and a preview axis-read nuance on the demo's synthetic ignition
+  table is a follow-up); real logs with sustained per-cell knock produce
+  non-zero pulls. The demo pack gained an ignition timing table + timing_deg
+  scaling for this and the log->tune navigation above.
 - `[~]` **Live tuning (422-DID WDBI catalog).** SID 0x2E write-DID catalog
   (round-63) is exposed through the CLI (`subaru-live-tune`). A GUI live-edit /
   Gauge Cluster consumer is future work.
