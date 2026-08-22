@@ -39,3 +39,11 @@ offset    = -40.0
 data_type = "uint8"
 unit      = "C"
 precision = 0
+
+[[scaling]]
+id        = "timing_deg"
+formula   = "linear"
+factor    = 0.5
+data_type = "uint8"
+unit      = "deg"
+precision = 1

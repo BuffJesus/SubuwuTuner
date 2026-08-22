@@ -19,6 +19,7 @@
 #include "st/library/datalog_session.hpp"
 #include "st/library/log_analysis.hpp"
 
+#include "actions.hpp" // jump_to_table
 #include "app_state.hpp"
 #include "panels/panels.hpp"
 #include "persistence.hpp"
@@ -494,6 +495,31 @@ std::size_t nearest_axis_cell(std::vector<double> const &axis, double value) {
     return best;
 }
 
+// Map a tuning-analysis finding to the calibration table a tuner would open to
+// address it (ignition for knock/DAM, fuel for lean, boost for overboost),
+// searching the loaded pack by category then name. Returns the first match, or
+// nullopt when the pack has no table for that domain.
+std::optional<std::string> resolve_finding_table(st::Definition const &def,
+                                                 std::string_view finding_id) {
+    std::vector<char const *> candidates;
+    if (finding_id.starts_with("knock") || finding_id == "dam") {
+        candidates = {"ignition", "timing", "advance", "spark", "knock"};
+    } else if (finding_id.starts_with("afr")) {
+        candidates = {"fuel", "afr", "lambda", "maf", "injector"};
+    } else if (finding_id.starts_with("boost")) {
+        candidates = {"boost", "wastegate", "wgdc"};
+    }
+    for (auto const *const sub : candidates) {
+        for (auto const &t : def.tables()) {
+            if (contains_case_insensitive(t.category, sub) ||
+                contains_case_insensitive(t.name, sub)) {
+                return t.id;
+            }
+        }
+    }
+    return std::nullopt;
+}
+
 void trace_sample_to_table(State &s, AppState &app_state) {
     if (!app_state.project.has_value() || !app_state.current_table_data.has_value() ||
         app_state.selected_table_id.empty()) {
@@ -779,6 +805,27 @@ void render_log_explorer_panel(AppState &app_state) {
                         }
                         s.session_message =
                             "Jumped to sample " + std::to_string(*f.worst_row) + ".";
+                    }
+                    // Log -> tune: open the calibration table for this finding
+                    // in the Tune workspace and highlight the cell at the
+                    // finding's rpm/load.
+                    if (app_state.project.has_value()) {
+                        ImGui::SameLine();
+                        char tbtn[64];
+                        std::snprintf(tbtn, sizeof(tbtn), "Open in Tune \xE2\x86\x92##la_tune_%s",
+                                      f.id.c_str());
+                        if (ImGui::SmallButton(tbtn)) {
+                            auto const tbl = resolve_finding_table(
+                                app_state.project->definition(), f.id);
+                            if (tbl.has_value() && jump_to_table(app_state, *tbl)) {
+                                s.trace_row = static_cast<int>(*f.worst_row);
+                                trace_sample_to_table(s, app_state);
+                            } else {
+                                s.session_message =
+                                    "No calibration table for this finding in the "
+                                    "loaded pack.";
+                            }
+                        }
                     }
                 }
                 ImGui::Unindent();

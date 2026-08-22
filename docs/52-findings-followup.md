@@ -62,6 +62,14 @@ reflects what is wired in the current tree.
   default-open "Tuning analysis" section and folds it into the Markdown
   findings export. 8 unit tests; verified live against `demo-knock-log.csv`.
   Grounded in the corpus datalog-mining track.
+- `[x]` **Log -> tune connection.** Each tuning-analysis finding with rpm/load
+  context has an "Open in Tune ->" action that resolves the calibration table
+  for the finding's domain (ignition for knock/DAM, fuel for lean, boost for
+  overboost) from the loaded pack, switches to the Tune workspace, selects that
+  table, and highlights the cell at the finding's rpm/load via the existing
+  map-cell trace. A knock event in the datalog now takes the tuner straight to
+  the ignition-timing cell where it happened. The demo pack gained an ignition
+  timing table so the loop is demonstrable end-to-end. Verified live.
 - `[~]` **Live tuning (422-DID WDBI catalog).** SID 0x2E write-DID catalog
   (round-63) is exposed through the CLI (`subaru-live-tune`). A GUI live-edit /
   Gauge Cluster consumer is future work.

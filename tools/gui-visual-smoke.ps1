@@ -440,6 +440,12 @@ try {
         $sampleButtonY = if ($logWidth -ge 1000) { 138 } else { 152 }
         Invoke-RelativeClick $process 215 $sampleButtonY
         $captures += Save-WindowScreenshot $process "03-log-sample"
+        # Log -> tune: "Open in Tune" on the knock finding jumps to the Tune
+        # workspace, selects the ignition table, and highlights the cell at
+        # the finding's rpm/load.
+        Invoke-RelativeClick $process 252 381 # "Open in Tune ->" on first finding
+        $captures += Save-WindowScreenshot $process "03b-log-to-tune"
+        Invoke-KeyChord $process ([byte[]](0x11, 0x32)) # Ctrl+2: back to Log
         Invoke-KeyChord $process ([byte[]](0x11, 0x33)) # Ctrl+3: Features
         $captures += Save-WindowScreenshot $process "04-feature-workspace"
         Invoke-KeyChord $process ([byte[]](0x11, 0x4B)) # Ctrl+K: command palette

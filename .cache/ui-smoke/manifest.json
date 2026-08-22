@@ -1,158 +1,77 @@
 ﻿{
     "executable":  "D:\\Subuwu\\code\\build\\win-mingw\\bin\\subuwutuner-gui.exe",
-    "scenario":  "Designer",
+    "scenario":  "Demo",
     "project":  "D:\\Subuwu\\code\\fixtures\\demo.stune",
     "requested_window":  "1400x880",
-    "pid":  16748,
+    "pid":  23180,
     "title":  "Demo (synthetic) — SubuwuTuner",
     "responding":  true,
     "stderr_empty":  true,
-    "stdout_bytes":  0,
+    "stdout_bytes":  86,
     "stderr_bytes":  0,
     "termination":  "stopped-by-harness",
     "exit_code":  null,
     "screenshots":  [
                         {
-                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke\\01-designer-empty.png",
+                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke\\01-tune-workspace.png",
                             "width":  1400,
                             "height":  880,
-                            "bytes":  93150,
-                            "sampled_colors":  37,
+                            "bytes":  97593,
+                            "sampled_colors":  43,
                             "non_black_ratio":  1,
                             "sanity_passed":  true
                         },
                         {
-                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke\\02-insert-palette.png",
+                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke\\02-log-empty-state.png",
                             "width":  1400,
                             "height":  880,
-                            "bytes":  141059,
-                            "sampled_colors":  38,
+                            "bytes":  68488,
+                            "sampled_colors":  31,
                             "non_black_ratio":  1,
                             "sanity_passed":  true
                         },
                         {
-                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke\\03-hook-node.png",
+                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke\\03-log-sample.png",
                             "width":  1400,
                             "height":  880,
-                            "bytes":  100751,
-                            "sampled_colors":  41,
+                            "bytes":  131075,
+                            "sampled_colors":  33,
                             "non_black_ratio":  1,
                             "sanity_passed":  true
                         },
                         {
-                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke\\04-hook-and-primitive.png",
+                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke\\03b-log-to-tune.png",
                             "width":  1400,
                             "height":  880,
-                            "bytes":  101238,
-                            "sampled_colors":  40,
+                            "bytes":  118409,
+                            "sampled_colors":  45,
                             "non_black_ratio":  1,
                             "sanity_passed":  true
                         },
                         {
-                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke\\05-wired-nodes.png",
+                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke\\04-feature-workspace.png",
                             "width":  1400,
                             "height":  880,
-                            "bytes":  101726,
-                            "sampled_colors":  47,
+                            "bytes":  95237,
+                            "sampled_colors":  34,
                             "non_black_ratio":  1,
                             "sanity_passed":  true
                         },
                         {
-                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke\\06-pin-default-popup.png",
+                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke\\05-command-palette.png",
                             "width":  1400,
                             "height":  880,
-                            "bytes":  103660,
-                            "sampled_colors":  41,
+                            "bytes":  122675,
+                            "sampled_colors":  52,
                             "non_black_ratio":  1,
                             "sanity_passed":  true
                         },
                         {
-                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke\\07-default-committed.png",
+                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke\\06-command-palette-dismissed.png",
                             "width":  1400,
                             "height":  880,
-                            "bytes":  100322,
-                            "sampled_colors":  40,
-                            "non_black_ratio":  1,
-                            "sanity_passed":  true
-                        },
-                        {
-                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke\\08-node-context-menu.png",
-                            "width":  1400,
-                            "height":  880,
-                            "bytes":  102071,
-                            "sampled_colors":  41,
-                            "non_black_ratio":  1,
-                            "sanity_passed":  true
-                        },
-                        {
-                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke\\09-edge-context-menu.png",
-                            "width":  1400,
-                            "height":  880,
-                            "bytes":  100322,
-                            "sampled_colors":  40,
-                            "non_black_ratio":  1,
-                            "sanity_passed":  true
-                        },
-                        {
-                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke\\10-validation-popup.png",
-                            "width":  1400,
-                            "height":  880,
-                            "bytes":  103135,
-                            "sampled_colors":  40,
-                            "non_black_ratio":  1,
-                            "sanity_passed":  true
-                        },
-                        {
-                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke\\11-compile-preview.png",
-                            "width":  1400,
-                            "height":  880,
-                            "bytes":  103751,
-                            "sampled_colors":  40,
-                            "non_black_ratio":  1,
-                            "sanity_passed":  true
-                        },
-                        {
-                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke\\12-load-discard-confirmation.png",
-                            "width":  1400,
-                            "height":  880,
-                            "bytes":  100936,
-                            "sampled_colors":  40,
-                            "non_black_ratio":  1,
-                            "sanity_passed":  true
-                        },
-                        {
-                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke\\13-clear-discard-confirmation.png",
-                            "width":  1400,
-                            "height":  880,
-                            "bytes":  108348,
-                            "sampled_colors":  39,
-                            "non_black_ratio":  1,
-                            "sanity_passed":  true
-                        },
-                        {
-                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke\\14-after-undo.png",
-                            "width":  1400,
-                            "height":  880,
-                            "bytes":  99839,
-                            "sampled_colors":  40,
-                            "non_black_ratio":  1,
-                            "sanity_passed":  true
-                        },
-                        {
-                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke\\15-lint-findings.png",
-                            "width":  1400,
-                            "height":  880,
-                            "bytes":  103089,
-                            "sampled_colors":  40,
-                            "non_black_ratio":  1,
-                            "sanity_passed":  true
-                        },
-                        {
-                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke\\16-after-redo.png",
-                            "width":  1400,
-                            "height":  880,
-                            "bytes":  99839,
-                            "sampled_colors":  40,
+                            "bytes":  92325,
+                            "sampled_colors":  33,
                             "non_black_ratio":  1,
                             "sanity_passed":  true
                         }

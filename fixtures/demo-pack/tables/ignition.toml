@@ -1,0 +1,15 @@
+# Ignition timing — the fundamental tuning table. 2D over RPM x load so the
+# Log Explorer "Open in Tune" affordance can map a knock finding's rpm/load
+# to a timing cell.
+[[table]]
+id          = "ignition_timing_primary"
+name        = "Ignition timing (primary)"
+category    = "ignition"
+dimensions  = 2
+address     = 0x0100
+data_type   = "uint8"
+scaling     = "timing_deg"
+axis_x      = "rpm_axis"
+axis_y      = "load_axis"
+engine_safety_critical = true
+notes       = "Primary spark advance vs RPM and engine load."
