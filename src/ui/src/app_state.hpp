@@ -235,6 +235,14 @@ struct AppState {
     // in the designer. An empty path means the graph has never been saved.
     std::filesystem::path features_document_path;
     bool features_document_dirty{false};
+    // Graph undo/redo. Diff-based: the designer serializes the graph at rest
+    // (no interaction active) and, when it differs from `features_undo_baseline`,
+    // pushes the baseline onto the undo stack. Snapshots are graph TOML strings
+    // (graphs are small; this avoids instrumenting every scattered mutation
+    // site and coalesces a drag into one checkpoint when it settles).
+    std::vector<std::string> features_undo_stack;
+    std::vector<std::string> features_redo_stack;
+    std::string features_undo_baseline;
     bool features_open_load_dialog{false};
     std::string features_compile_error;
     std::string features_compile_arch;

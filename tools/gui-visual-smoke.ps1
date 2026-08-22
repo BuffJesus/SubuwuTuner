@@ -341,11 +341,19 @@ try {
         Invoke-KeyChord $process ([byte[]](0x1B))
         Invoke-RelativeClick $process 175 227 # Compile preview
         $captures += Save-WindowScreenshot $process "11-compile-preview"
-        Invoke-RelativeClick $process 482 200 # Load, expect dirty-document gate
+        # Toolbar order: Insert | Undo | Redo | Clear graph | Reset view | Save |
+        # Load | ... (Undo/Redo were added between Insert and Clear graph).
+        Invoke-RelativeClick $process 583 200 # Load, expect dirty-document gate
         $captures += Save-WindowScreenshot $process "12-load-discard-confirmation"
         Invoke-RelativeClick $process 552 479 # Keep editing
-        Invoke-RelativeClick $process 216 200 # Clear graph, expect discard gate
+        Invoke-RelativeClick $process 318 200 # Clear graph, expect discard gate
         $captures += Save-WindowScreenshot $process "13-clear-discard-confirmation"
+        Invoke-RelativeClick $process 552 479 # Keep editing (dismiss clear gate)
+        # Graph undo/redo: undo reverts the last edit, redo re-applies it.
+        Invoke-RelativeClick $process 190 200 # Undo
+        $captures += Save-WindowScreenshot $process "14-after-undo"
+        Invoke-RelativeClick $process 241 200 # Redo
+        $captures += Save-WindowScreenshot $process "15-after-redo"
     } elseif ($Scenario -eq "Readiness") {
         # Dirty the project with one cell edit so the readiness verification
         # summary shows an actionable item and the Save-project remediation

@@ -256,8 +256,16 @@ Work this queue top-to-bottom while the bench rig is unavailable:
    dotted platform selection (`subaru.va.*` / `subaru.vb.*`) and visually
    confirms SH-2A preview output. A patch-producing fixture, RH850 visual pass,
    and focused failure-state screenshots remain.
-6. `[ ]` Add designer undo/redo for graph mutations and keyboard-accessible
-   node, edge, connection, deletion, and property-edit workflows.
+6. `[~]` Add designer undo/redo for graph mutations and keyboard-accessible
+   node, edge, connection, deletion, and property-edit workflows. Graph
+   undo/redo is implemented via diff-based snapshots (the graph is serialized
+   at rest; a checkpoint fires when it differs from the baseline, capturing
+   every mutation — add/delete/wire/pin-default/move — at one site and
+   coalescing a drag into one checkpoint). Undo/Redo toolbar buttons + Ctrl+Z /
+   Ctrl+Y (and Ctrl+Shift+Z) when the designer is focused and no text field is
+   active; load resets the history. Verified live: undoing a pin-default edit
+   reverts to a lint warning, redo restores it. Broader keyboard-accessible
+   node/edge/connection workflows remain.
 
 ## Background track - VA STI DCCD and combination-meter integration
 

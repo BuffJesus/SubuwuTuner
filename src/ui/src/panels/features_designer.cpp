@@ -56,6 +56,70 @@ bool save_feature_document(AppState &state, std::filesystem::path const &path) {
     return true;
 }
 
+// ---- Graph undo/redo (diff-based snapshots) --------------------------------
+// The graph is serialized to TOML at rest; a checkpoint fires when it differs
+// from the baseline. This captures every mutation (add/delete/wire/default/
+// move) at one site and coalesces a drag into a single checkpoint.
+
+void features_reset_undo(AppState &state) {
+    state.features_undo_baseline = st::feature::to_toml(state.features_graph);
+    state.features_undo_stack.clear();
+    state.features_redo_stack.clear();
+}
+
+void features_checkpoint(AppState &state) {
+    std::string cur = st::feature::to_toml(state.features_graph);
+    if (cur == state.features_undo_baseline) {
+        return;
+    }
+    state.features_undo_stack.push_back(state.features_undo_baseline);
+    constexpr std::size_t kCap = 100;
+    if (state.features_undo_stack.size() > kCap) {
+        state.features_undo_stack.erase(state.features_undo_stack.begin());
+    }
+    state.features_undo_baseline = std::move(cur);
+    state.features_redo_stack.clear();
+}
+
+// Restore the graph from `snapshot`, updating the baseline. Returns false and
+// leaves state untouched if the snapshot fails to parse (never corrupts the
+// live graph). Clears selection since it may reference removed nodes.
+bool features_apply_snapshot(AppState &state, std::string snapshot) {
+    auto g = st::feature::from_toml(snapshot);
+    if (!g.has_value()) {
+        return false;
+    }
+    state.features_graph = std::move(*g);
+    state.features_undo_baseline = std::move(snapshot);
+    state.features_document_dirty = true;
+    state.features_selected_nodes.clear();
+    return true;
+}
+
+void features_undo(AppState &state) {
+    if (state.features_undo_stack.empty()) {
+        return;
+    }
+    std::string prev = std::move(state.features_undo_stack.back());
+    state.features_undo_stack.pop_back();
+    std::string const current = state.features_undo_baseline;
+    if (features_apply_snapshot(state, std::move(prev))) {
+        state.features_redo_stack.push_back(current);
+    }
+}
+
+void features_redo(AppState &state) {
+    if (state.features_redo_stack.empty()) {
+        return;
+    }
+    std::string next = std::move(state.features_redo_stack.back());
+    state.features_redo_stack.pop_back();
+    std::string const current = state.features_undo_baseline;
+    if (features_apply_snapshot(state, std::move(next))) {
+        state.features_undo_stack.push_back(current);
+    }
+}
+
 void compile_feature_preview(AppState &state) {
     state.features_compile_error.clear();
     state.features_compile_arch.clear();
@@ -124,6 +188,12 @@ void render_features_designer(AppState &state) {
         return;
     }
     track_help_context(state, AppState::HelpContext::FeaturesDesigner);
+
+    // Initialize the undo baseline on first render (baseline is never empty
+    // once set, since to_toml always emits a header).
+    if (state.features_undo_baseline.empty()) {
+        features_reset_undo(state);
+    }
 
     // Preview status pill — surfaces the API-may-shift caveat without
     // littering the window title. Sits as a single-line strip above the
@@ -321,6 +391,21 @@ void render_features_designer(AppState &state) {
         state.features_band_active = false;
     };
     ImGui::SameLine();
+    ImGui::BeginDisabled(state.features_undo_stack.empty());
+    if (ImGui::Button("Undo##features_undo")) {
+        features_undo(state);
+    }
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered() && state.features_undo_stack.empty()) {
+        ImGui::SetTooltip("Nothing to undo (Ctrl+Z)");
+    }
+    ImGui::SameLine();
+    ImGui::BeginDisabled(state.features_redo_stack.empty());
+    if (ImGui::Button("Redo##features_redo")) {
+        features_redo(state);
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
     if (ImGui::Button("\xEE\x9D\x9A  Clear graph")) {
         if (state.features_document_dirty) {
             ImGui::OpenPopup("Discard unsaved feature graph?##features_clear_confirm");
@@ -427,6 +512,8 @@ void render_features_designer(AppState &state) {
                     state.features_selected_edge.reset();
                     state.features_context_edge.reset();
                     state.features_band_active = false;
+                    // New document — undo history should not cross the load.
+                    features_reset_undo(state);
                     enqueue_toast(state, ToastKind::Success,
                                   "Feature graph loaded: " +
                                       std::filesystem::path{out.get()}.filename().string());
@@ -720,6 +807,21 @@ void render_features_designer(AppState &state) {
             pending_delete_nodes = state.features_selected_nodes;
         } else if (state.features_selected_edge.has_value()) {
             pending_delete_edge = state.features_selected_edge;
+        }
+    }
+    // Graph undo/redo keys — gated on focus AND no active item so Ctrl+Z in a
+    // pin-default text field still does text-undo. Ctrl+Z undo; Ctrl+Y or
+    // Ctrl+Shift+Z redo (Ctrl+Y avoids the AMD-overlay Ctrl+Shift+Z clash on
+    // some machines).
+    if (designer_focused && !ImGui::IsAnyItemActive() && ImGui::GetIO().KeyCtrl) {
+        if (ImGui::IsKeyPressed(ImGuiKey_Z, /*repeat=*/false)) {
+            if (ImGui::GetIO().KeyShift) {
+                features_redo(state);
+            } else {
+                features_undo(state);
+            }
+        } else if (ImGui::IsKeyPressed(ImGuiKey_Y, /*repeat=*/false)) {
+            features_redo(state);
         }
     }
 
@@ -1444,6 +1546,13 @@ void render_features_designer(AppState &state) {
     // sensibly when more nodes are added than fit.
     ImGui::SetCursorScreenPos(canvas_p);
     ImGui::Dummy(canvas_sz);
+
+    // End-of-frame undo checkpoint. Defer while any interaction is in flight
+    // (a node drag, a pin-default edit, an in-progress wire) so the mutation
+    // is captured once it settles rather than every frame.
+    if (!ImGui::IsAnyItemActive() && !state.features_wiring_active) {
+        features_checkpoint(state);
+    }
 
     ImGui::End();
 }
