@@ -38,8 +38,12 @@ enum class Role {
     Dam,           // dynamic advance multiplier (< 1.0 = global timing pull)
     TargetBoost,
     ActualBoost,
-    CommandedAfr, // commanded / target AFR (or lambda)
-    ObservedAfr,  // observed / wideband AFR (or lambda)
+    CommandedAfr,   // commanded / target AFR (or lambda)
+    ObservedAfr,    // observed / wideband AFR (or lambda)
+    FuelTrimShort,  // short-term fuel trim / AF correction (%)
+    FuelTrimLong,   // long-term fuel trim / AF learning (%)
+    InjectorDuty,   // injector duty cycle (%) — fueling headroom
+    Maf,            // mass airflow (g/s) — context channel
     Unknown,
 };
 

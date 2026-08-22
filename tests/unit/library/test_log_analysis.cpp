@@ -143,3 +143,50 @@ TEST_CASE("analyze summarizes an empty / unrecognized log",
     CHECK(a.channels.empty());
     CHECK(a.summary.find("No recognized") != std::string::npos);
 }
+
+TEST_CASE("resolve_channels maps real COBB AP header names",
+          "[library][log_analysis]") {
+    auto const d = dl::parse(
+        "RPM (RPM),Calculated Load (g/rev),Feedback Knock (deg),"
+        "Fine Learning Knock (deg),Dynamic Advance Multiplier (),Boost (psi),"
+        "AF Ratio (AFR),AF Correction #1 (%),AF Learning #1 (%),"
+        "Injector Duty Cycle (%),Mass Airflow (g/s)\n"
+        "3000,2.0,0.0,0.0,1.0,15.0,14.7,0.0,0.0,50.0,90.0\n");
+    auto const a = la::analyze(d);
+    CHECK(count_role(a, la::Role::Rpm) == 1);
+    CHECK(count_role(a, la::Role::Load) == 1);
+    CHECK(count_role(a, la::Role::FeedbackKnock) == 1);
+    CHECK(count_role(a, la::Role::FineKnock) == 1);
+    CHECK(count_role(a, la::Role::Dam) == 1);
+    CHECK(count_role(a, la::Role::ActualBoost) == 1); // plain "Boost (psi)"
+    CHECK(count_role(a, la::Role::ObservedAfr) == 1); // "AF Ratio"
+    CHECK(count_role(a, la::Role::FuelTrimShort) == 1);
+    CHECK(count_role(a, la::Role::FuelTrimLong) == 1);
+    CHECK(count_role(a, la::Role::InjectorDuty) == 1);
+    CHECK(count_role(a, la::Role::Maf) == 1);
+    // "AF Correction"/"AF Learning" must NOT be misread as observed AFR.
+    CHECK(count_role(a, la::Role::CommandedAfr) == 0);
+}
+
+TEST_CASE("analyze flags a large fuel trim (MAF scaling)",
+          "[library][log_analysis]") {
+    auto const d = dl::parse("rpm,af correction,af learning\n"
+                             "2000,2.0,3.0\n"
+                             "5000,9.0,7.0\n"); // combined +16%
+    auto const a = la::analyze(d);
+    auto const *ft = find(a, "fuel.trim");
+    REQUIRE(ft != nullptr);
+    CHECK(ft->severity == la::Severity::Medium); // >10 but <20
+    CHECK(ft->worst_value == Catch::Approx(16.0));
+}
+
+TEST_CASE("analyze flags injectors near maximum", "[library][log_analysis]") {
+    auto const d = dl::parse("rpm,injector duty cycle\n"
+                             "2000,45.0\n"
+                             "6000,96.5\n");
+    auto const a = la::analyze(d);
+    auto const *inj = find(a, "injector.duty");
+    REQUIRE(inj != nullptr);
+    CHECK(inj->severity == la::Severity::High); // >=95
+    CHECK(inj->worst_value == Catch::Approx(96.5));
+}

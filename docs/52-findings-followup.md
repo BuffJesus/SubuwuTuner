@@ -60,8 +60,17 @@ reflects what is wired in the current tree.
   pull, DAM below 1.0, overboost, and lean-under-load, plus reassuring
   "no knock" / "DAM held" findings on a clean log. The Log Explorer shows a
   default-open "Tuning analysis" section and folds it into the Markdown
-  findings export. 8 unit tests; verified live against `demo-knock-log.csv`.
-  Grounded in the corpus datalog-mining track.
+  findings export. Verified live against `demo-knock-log.csv`. Grounded in the
+  corpus datalog-mining track.
+  - **Broadened for real COBB AccessPort logs (2026-08-22):** the role resolver
+    now recognizes real AP column names (`Feedback Knock`, `Fine Learning
+    Knock`, `Dynamic Advance Multiplier`, `Boost (psi)`, `AF Ratio`,
+    `AF Correction`/`AF Learning`, `Injector Duty Cycle`, `Mass Airflow`), with
+    fuel-trim ordered before AFR so `AF Correction` isn't misread. Two new
+    findings: **large fuel trim** (short+long combined beyond +/-10%, pointing
+    at MAF scaling) and **injectors near maximum** (injector duty >= 90%,
+    fueling headroom). The finding->table resolver maps fuel-trim to MAF/fuel
+    and injector-duty to injector tables. 11 unit tests.
 - `[x]` **Log -> tune connection.** Each tuning-analysis finding with rpm/load
   context has an "Open in Tune ->" action that resolves the calibration table
   for the finding's domain (ignition for knock/DAM, fuel for lean, boost for

@@ -506,6 +506,11 @@ std::optional<std::string> resolve_finding_table(st::Definition const &def,
         candidates = {"ignition", "timing", "advance", "spark", "knock"};
     } else if (finding_id.starts_with("afr")) {
         candidates = {"fuel", "afr", "lambda", "maf", "injector"};
+    } else if (finding_id.starts_with("fuel")) {
+        // Fuel-trim health points at MAF scaling first, then fuel tables.
+        candidates = {"maf", "mass air", "fuel", "afr"};
+    } else if (finding_id.starts_with("injector")) {
+        candidates = {"injector", "inj", "fuel"};
     } else if (finding_id.starts_with("boost")) {
         candidates = {"boost", "wastegate", "wgdc"};
     }

@@ -32,42 +32,61 @@ bool contains(std::string const &h, std::string_view needle) {
 
 Role classify_header(std::string_view header) {
     std::string const h = to_lower(header);
-    // Knock first — most safety-critical and unambiguous.
+    // Knock first — most safety-critical and unambiguous. Fine before feedback
+    // so "fine learning knock" doesn't fall into the feedback branch.
+    if (contains(h, "flkc") || (contains(h, "fine") && contains(h, "knock")) ||
+        (contains(h, "learning") && contains(h, "knock")) ||
+        (contains(h, "knock") && contains(h, "learn"))) {
+        return Role::FineKnock;
+    }
     if (contains(h, "fbkc") || contains(h, "fbk") ||
         (contains(h, "feedback") && contains(h, "knock"))) {
         return Role::FeedbackKnock;
-    }
-    if (contains(h, "flkc") || (contains(h, "fine") && contains(h, "knock")) ||
-        (contains(h, "knock") && contains(h, "learn"))) {
-        return Role::FineKnock;
     }
     if (h == "dam" || contains(h, "dynamic advance") || contains(h, "advance mult") ||
         contains(h, "advance_mult")) {
         return Role::Dam;
     }
+    // Fuel trim BEFORE AFR — real AP columns "AF Correction" / "AF Learning"
+    // contain "af" and would otherwise fall into the observed-AFR branch.
+    if (contains(h, "af correction") || contains(h, "af_correction") ||
+        contains(h, "short term") || contains(h, "short-term") || contains(h, "stft")) {
+        return Role::FuelTrimShort;
+    }
+    if (contains(h, "af learning") || contains(h, "af_learning") ||
+        contains(h, "long term") || contains(h, "long-term") || contains(h, "ltft")) {
+        return Role::FuelTrimLong;
+    }
+    if (contains(h, "injector duty") || contains(h, "inj duty") || contains(h, "idc") ||
+        (contains(h, "duty") && contains(h, "inj"))) {
+        return Role::InjectorDuty;
+    }
+    if (contains(h, "mass airflow") || contains(h, "maf") || h == "mass air flow") {
+        return Role::Maf;
+    }
     if (contains(h, "boost")) {
         if (contains(h, "target") || contains(h, "desired") || contains(h, "req")) {
             return Role::TargetBoost;
         }
-        if (contains(h, "actual") || contains(h, "obs") || contains(h, "measured")) {
-            return Role::ActualBoost;
-        }
+        // Plain "boost" (COBB AP logs "Boost (psi)") is the measured value.
+        return Role::ActualBoost;
     }
     if (h == "cmd" || contains(h, "commanded") || contains(h, "af_target") ||
         contains(h, "afr_target") || contains(h, "lambda_target") ||
         contains(h, "target_afr") || contains(h, "target afr")) {
         return Role::CommandedAfr;
     }
-    if (h == "obs" || contains(h, "wideband") || contains(h, "af_sensor") ||
-        contains(h, "afr_actual") || contains(h, "lambda_actual") ||
-        contains(h, "observed") || contains(h, "af sensor")) {
+    if (h == "obs" || contains(h, "wideband") || contains(h, "af sensor") ||
+        contains(h, "af_sensor") || contains(h, "af ratio") || contains(h, "af_ratio") ||
+        contains(h, "afr_actual") || contains(h, "lambda_actual") || contains(h, "observed") ||
+        contains(h, "afr") || contains(h, "lambda")) {
         return Role::ObservedAfr;
     }
     if (h == "rpm" || contains(h, "rpm") || contains(h, "engine speed")) {
         return Role::Rpm;
     }
     if (h == "load" || contains(h, "calc load") || contains(h, "calculated load") ||
-        (contains(h, "load") && !contains(h, "download"))) {
+        contains(h, "engine load") || (contains(h, "load") && !contains(h, "download"))) {
         return Role::Load;
     }
     return Role::Unknown;
@@ -116,6 +135,8 @@ constexpr double kKnockEps = -0.05;      // ignore float noise below this
 constexpr double kOverboostRel = 0.10;   // >10% over target = overboost
 constexpr double kLeanRel = 0.04;        // >4% leaner than commanded
 constexpr double kHighLoadFraction = 0.7; // "under load" = top 30% of load
+constexpr double kFuelTrimPct = 10.0;    // |short+long| beyond this = flag (%)
+constexpr double kInjectorDutyPct = 90.0; // injector duty at/above this = flag (%)
 
 }  // namespace
 
@@ -130,6 +151,10 @@ std::string_view to_string(Role role) noexcept {
     case Role::ActualBoost: return "Actual boost";
     case Role::CommandedAfr: return "Commanded AFR";
     case Role::ObservedAfr: return "Observed AFR";
+    case Role::FuelTrimShort: return "Short-term fuel trim";
+    case Role::FuelTrimLong: return "Long-term fuel trim";
+    case Role::InjectorDuty: return "Injector duty";
+    case Role::Maf: return "Mass airflow";
     case Role::Unknown: return "Unknown";
     }
     return "Unknown";
@@ -391,6 +416,84 @@ LogAnalysis analyze(datalog_csv::ParsedDatalog const &datalog) {
                 add_context(f, datalog, chans);
                 result.findings.push_back(std::move(f));
             }
+        }
+    }
+
+    // ---- Fuel trim (MAF scaling / fueling health) ----------------------
+    {
+        auto const st_col = first_of(chans, Role::FuelTrimShort);
+        auto const lt_col = first_of(chans, Role::FuelTrimLong);
+        if (st_col.has_value() || lt_col.has_value()) {
+            double worst = 0.0; // largest-magnitude combined trim
+            std::optional<std::size_t> worst_row;
+            for (std::size_t r = 0; r < rows; ++r) {
+                double combined = 0.0;
+                bool any = false;
+                if (st_col.has_value()) {
+                    double const v = sample_at(datalog, *st_col, r);
+                    if (!std::isnan(v)) {
+                        combined += v;
+                        any = true;
+                    }
+                }
+                if (lt_col.has_value()) {
+                    double const v = sample_at(datalog, *lt_col, r);
+                    if (!std::isnan(v)) {
+                        combined += v;
+                        any = true;
+                    }
+                }
+                if (any && std::fabs(combined) > std::fabs(worst)) {
+                    worst = combined;
+                    worst_row = r;
+                }
+            }
+            if (std::fabs(worst) > kFuelTrimPct) {
+                LogFinding f;
+                f.id = "fuel.trim";
+                f.title = "Large fuel trim";
+                f.severity = std::fabs(worst) > 20.0 ? Severity::High : Severity::Medium;
+                f.worst_value = worst;
+                f.worst_row = worst_row;
+                f.detail =
+                    "Total fuel trim reached " + num(worst, 1) + "% \xE2\x80\x94 " +
+                    (worst > 0.0 ? "the ECU is adding fuel, so the MAF is reading low (lean bias)."
+                                 : "the ECU is pulling fuel, so the MAF is reading high (rich "
+                                   "bias).") +
+                    " Correct MAF scaling before trusting open-loop fueling.";
+                add_context(f, datalog, chans);
+                result.findings.push_back(std::move(f));
+            }
+        }
+    }
+
+    // ---- Injector duty cycle (fueling headroom) ------------------------
+    if (auto idc = first_of(chans, Role::InjectorDuty)) {
+        double max_idc = 0.0;
+        std::optional<std::size_t> worst_row;
+        for (std::size_t r = 0; r < rows; ++r) {
+            double const v = sample_at(datalog, *idc, r);
+            if (std::isnan(v)) {
+                continue;
+            }
+            if (v > max_idc) {
+                max_idc = v;
+                worst_row = r;
+            }
+        }
+        if (max_idc >= kInjectorDutyPct) {
+            LogFinding f;
+            f.id = "injector.duty";
+            f.title = "Injectors near maximum";
+            f.severity = max_idc >= 95.0 ? Severity::High : Severity::Medium;
+            f.worst_value = max_idc;
+            f.worst_row = worst_row;
+            f.detail = "Injector duty peaked at " + num(max_idc, 1) +
+                       "% \xE2\x80\x94 the injectors are near static (100%), leaving little "
+                       "fueling headroom. More power needs larger injectors or the fuel will "
+                       "run out.";
+            add_context(f, datalog, chans);
+            result.findings.push_back(std::move(f));
         }
     }
 
