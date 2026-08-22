@@ -10,6 +10,7 @@ add_library(st_library STATIC
     src/filename_classifier.cpp
     src/datalog_csv.cpp
     src/datalog_session.cpp
+    src/log_analysis.cpp
     src/guided_tasks.cpp
 )
 

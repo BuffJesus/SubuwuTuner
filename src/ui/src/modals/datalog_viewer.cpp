@@ -17,10 +17,12 @@
 
 #include "st/library/datalog_csv.hpp"
 #include "st/library/datalog_session.hpp"
+#include "st/library/log_analysis.hpp"
 
 #include "app_state.hpp"
 #include "panels/panels.hpp"
 #include "persistence.hpp"
+#include "theme.hpp"
 #include "widgets/widgets.hpp"
 
 #include <algorithm>
@@ -47,6 +49,9 @@ namespace {
 struct State {
     std::string source_path;
     st::library::datalog_csv::ParsedDatalog dl;
+    // Tuning-domain analysis (knock / DAM / boost / AFR), recomputed once
+    // per load. Cheap enough to keep cached rather than per-frame.
+    st::library::log_analysis::LogAnalysis analysis;
     // Per-channel "show in plot" flag. ImPlot can cycle colors
     // through several overlaid series without trouble, so multi-
     // channel overlay falls out naturally — checkboxes in the stats
@@ -177,6 +182,7 @@ void load_csv(State &s, std::string const &path) {
         return;
     }
     s.plot_visible.assign(s.dl.headers.size(), char{0});
+    s.analysis = st::library::log_analysis::analyze(s.dl);
     s.range_last = static_cast<int>(s.dl.row_count);
     for (std::size_t i = 0; i < s.dl.headers.size(); ++i) {
         if (contains_case_insensitive(s.dl.headers[i], "rpm") ||
@@ -335,6 +341,29 @@ void export_findings(State &s) {
            << " to " << s.range_last << " (exclusive)\n\n";
     if (s.session_notes[0] != '\0') {
         report << "## Notes\n\n" << s.session_notes << "\n\n";
+    }
+    if (!s.analysis.channels.empty()) {
+        report << "## Tuning analysis\n\n" << s.analysis.summary << "\n\n";
+        for (auto const &f : s.analysis.findings) {
+            report << "- **" << f.title << "** ["
+                   << std::string{st::library::log_analysis::to_string(f.severity)} << "] \xE2\x80\x94 "
+                   << f.detail;
+            if (f.at_rpm.has_value() || f.at_load.has_value()) {
+                report << " (";
+                if (f.at_rpm.has_value()) {
+                    report << "at " << *f.at_rpm << " rpm";
+                }
+                if (f.at_rpm.has_value() && f.at_load.has_value()) {
+                    report << ", ";
+                }
+                if (f.at_load.has_value()) {
+                    report << "load " << *f.at_load;
+                }
+                report << ")";
+            }
+            report << "\n";
+        }
+        report << "\n";
     }
     report << "## Plotted-channel statistics\n\n| Channel | Unit | Samples | Min | Max | Mean |\n"
               "|---|---:|---:|---:|---:|---:|\n";
@@ -687,6 +716,57 @@ void render_log_explorer_panel(AppState &app_state) {
         }
     }
     ImGui::Spacing();
+
+    // Tuning analysis — knock / DAM / boost / AFR findings for the loaded log,
+    // ranked most-severe first. The first thing a tuner wants to know: did it
+    // knock, did the ECU pull timing, did boost and fueling behave?
+    if (!s.analysis.channels.empty()) {
+        namespace la = st::library::log_analysis;
+        auto const severity_color = [](la::Severity sev) -> ImVec4 {
+            switch (sev) {
+            case la::Severity::High: return chip_fg_danger();
+            case la::Severity::Medium: return chip_fg_caution();
+            case la::Severity::Low: return chip_fg_info();
+            case la::Severity::Info: return chip_fg_ok();
+            }
+            return chip_fg_info();
+        };
+        // Worst severity across findings drives the header summary color.
+        la::Severity worst = la::Severity::Info;
+        for (auto const &f : s.analysis.findings) {
+            if (static_cast<int>(f.severity) > static_cast<int>(worst)) {
+                worst = f.severity;
+            }
+        }
+        if (ImGui::CollapsingHeader("Tuning analysis", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::TextColored(severity_color(worst), "%s", s.analysis.summary.c_str());
+            ImGui::Spacing();
+            for (auto const &f : s.analysis.findings) {
+                ImGui::TextColored(severity_color(f.severity), "%s  [%s]", f.title.c_str(),
+                                   std::string{la::to_string(f.severity)}.c_str());
+                ImGui::Indent();
+                ImGui::TextWrapped("%s", f.detail.c_str());
+                if (f.at_rpm.has_value() || f.at_load.has_value()) {
+                    char ctx[96];
+                    if (f.at_rpm.has_value() && f.at_load.has_value()) {
+                        std::snprintf(ctx, sizeof(ctx), "at %.0f rpm, load %.2f", *f.at_rpm,
+                                      *f.at_load);
+                    } else if (f.at_rpm.has_value()) {
+                        std::snprintf(ctx, sizeof(ctx), "at %.0f rpm", *f.at_rpm);
+                    } else {
+                        std::snprintf(ctx, sizeof(ctx), "at load %.2f", *f.at_load);
+                    }
+                    text_subtle("%s", ctx);
+                }
+                ImGui::Unindent();
+                ImGui::Spacing();
+            }
+            text_subtle("Resolved %zu tuning channel(s) by name. Thresholds are conservative "
+                        "defaults; use the plots and range stats to confirm.",
+                        s.analysis.channels.size());
+        }
+        ImGui::Spacing();
+    }
 
     ImGui::SetNextItemWidth(90.0f);
     if (ImGui::InputInt("First row##dl_range_first", &s.range_first)) {

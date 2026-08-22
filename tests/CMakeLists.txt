@@ -78,6 +78,7 @@ add_executable(st_unit_tests
     unit/library/test_filename_classifier.cpp
     unit/library/test_datalog_csv.cpp
     unit/library/test_datalog_session.cpp
+    unit/library/test_log_analysis.cpp
     unit/library/test_guided_tasks.cpp
     unit/ui/test_offline_workflow_smoke.cpp
     unit/devices/ets/test_ptm_variant_dispatcher.cpp

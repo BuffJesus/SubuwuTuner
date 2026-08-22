@@ -53,6 +53,15 @@ reflects what is wired in the current tree.
 
 ## Functionality
 
+- `[x]` **Tuning-domain log analysis.** `st::library::log_analysis` resolves
+  datalog channel roles from header names (fbkc/flkc/dam/target_boost/
+  actual_boost/cmd/obs/rpm/load) and produces severity-ranked, plain-language
+  findings: active knock retard (with cyl + rpm/load context), learned timing
+  pull, DAM below 1.0, overboost, and lean-under-load, plus reassuring
+  "no knock" / "DAM held" findings on a clean log. The Log Explorer shows a
+  default-open "Tuning analysis" section and folds it into the Markdown
+  findings export. 8 unit tests; verified live against `demo-knock-log.csv`.
+  Grounded in the corpus datalog-mining track.
 - `[~]` **Live tuning (422-DID WDBI catalog).** SID 0x2E write-DID catalog
   (round-63) is exposed through the CLI (`subaru-live-tune`). A GUI live-edit /
   Gauge Cluster consumer is future work.
