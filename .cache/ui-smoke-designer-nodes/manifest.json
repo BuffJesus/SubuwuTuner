@@ -1,0 +1,52 @@
+﻿{
+    "executable":  "D:\\Subuwu\\code\\build\\win-clang-coherent\\bin\\subuwutuner-gui.exe",
+    "scenario":  "Designer",
+    "project":  "D:\\Subuwu\\code\\fixtures\\demo.stune",
+    "requested_window":  "1400x880",
+    "pid":  424,
+    "title":  "Demo (synthetic) — SubuwuTuner",
+    "responding":  true,
+    "stderr_empty":  true,
+    "stdout_bytes":  0,
+    "stderr_bytes":  0,
+    "termination":  "stopped-by-harness",
+    "exit_code":  null,
+    "screenshots":  [
+                        {
+                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke-designer-nodes\\01-designer-empty.png",
+                            "width":  1400,
+                            "height":  880,
+                            "bytes":  89252,
+                            "sampled_colors":  10,
+                            "non_black_ratio":  1,
+                            "sanity_passed":  true
+                        },
+                        {
+                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke-designer-nodes\\02-insert-palette.png",
+                            "width":  1400,
+                            "height":  880,
+                            "bytes":  135539,
+                            "sampled_colors":  11,
+                            "non_black_ratio":  1,
+                            "sanity_passed":  true
+                        },
+                        {
+                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke-designer-nodes\\03-hook-node.png",
+                            "width":  1400,
+                            "height":  880,
+                            "bytes":  91590,
+                            "sampled_colors":  11,
+                            "non_black_ratio":  1,
+                            "sanity_passed":  true
+                        },
+                        {
+                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke-designer-nodes\\04-hook-and-primitive.png",
+                            "width":  1400,
+                            "height":  880,
+                            "bytes":  92054,
+                            "sampled_colors":  10,
+                            "non_black_ratio":  1,
+                            "sanity_passed":  true
+                        }
+                    ]
+}

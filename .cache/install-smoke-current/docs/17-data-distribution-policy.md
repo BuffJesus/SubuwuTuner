@@ -1,0 +1,123 @@
+# 17 — Data distribution policy
+
+This document is the project's standing policy on what the public Apache-2.0 release ships and what it does not. It is forward-looking: it describes the rules that govern future first-party content. The historical decision that produced these rules is recorded in `docs/15-clean-room-engineering.md` §13 and in the parallel private audit at `D:\Subuwu\specs\AUDIT.md`; this document does not re-litigate it.
+
+## 1 — What ships
+
+The public release at `github.com/BuffJesus/SubuwuTuner` carries the **tool**:
+
+- Domain libraries: `st::core`, `st::rom`, `st::defs`, `st::edit`, `st::project`, `st::transport`, `st::ecu`, `st::log`, `st::can`, `st::dbc`, `st::discover`, `st::flash`, `st::autotune`, `st::policy`
+- Frontends: `subuwutuner-cli` and `subuwutuner-gui`
+- Build system, CI, tests, design docs
+- `tools/defgen/` — the RomRaider-XML → TOML converter
+- `fixtures/demo-pack/` — a synthetic, always-available example pack
+- `definitions/` for older Subarus (Impreza, Forester, Legacy, Liberty, Outback, Baja, Tribeca, Exiga) sourced from genuine community RomRaider/ECUFlash work, plus 25 VA/VB WRX FA-DIT packs landed 2026-05-19 from forum-sourced per-CID RomRaider XMLs (see §2)
+- `definitions/pids.toml` and `definitions/ecuparams/` — SSM datalogger payload + per-CID extended-PID fragments, also community-sourced
+
+The pattern is **infrastructure plus user-supplied data**. SubuwuTuner is structurally similar to TunerStudio, EFI Live, or Ghidra in that respect: the tool is open, the calibration data the user loads into it is the user's own responsibility.
+
+## 2 — What does ship for VA/VB WRX (revised 2026-05-19)
+
+Path B's original posture (2026-05 initial commit) was: no first-party VA WRX (2015–2021) or VB WRX (2022+) calibration packs in the public repo. That posture was conservative — it assumed the only available VA/VB definition data had upstream §1201 problems.
+
+That assumption was revised when forum-sourced per-CID RomRaider XMLs surfaced for both platforms (in-tree at `fixtures/private/roms_extracted/romraider-xml-per-cid/`, derived from forum-shared `romraider_va_wrx.xml` + `romraider_vb_wrx.xml` via the `make_per_cid_xmls.py` flattener). Provenance was verified clean per `project_intree_va_vb_xml_provenance.md` (memory). Running these through `tools/defgen/` produces packs that pass all four §4 acceptance criteria, so they ship.
+
+Current state of `definitions/impreza/` for FA-DIT WRX:
+
+| Family             | Count | CIDs |
+|--------------------|-------|------|
+| VA WRX 2015–2021 6MT | 7     | LF75404H, LF75404S, LF75600H, LF79103P, LF9C102P, LF9G003T, LF9L000E |
+| VB WRX 2022+         | 18    | LHBH800B00G, LHBH800C00G, LHBH900B00G, LHBH900D00G, LHBHB10B00G, LHBHC01C00G, LHBHD00B00G, LHBHE00Bx0G, LHBHE00Cx0G, LHBKC40M00G, LHBKC40P00G, LHBKC50My0G, LHBP300d00G, LHBP301b00G, LHBP400bz0G, LHBT120bA0G, LHBT210UB0G, LHBT210VB0G |
+
+(All in `definitions/impreza/` — the original `definitions/va/` and `definitions/vb/` directory carve-outs from the initial Path B commit are retired; FA-DIT WRX packs live alongside their EJ-era WRX siblings in the impreza family directory.)
+
+CIDs still NOT shipped because no per-CID XML has been sourced:
+- **LF9D012H** (2019 USDM 6MT) — only VA master entry missing from the per-CID XML set
+- Any platform / family not in the in-tree per-CID set above
+
+For those, users still obtain definitions via:
+
+1. Running `tools/defgen/defgen.py` against a public RomRaider XML they've sourced themselves, or
+2. Generating from their own ROM dump via the planned hardware-capture workflow (when the bench rig lands), or
+3. Independently reverse-engineering, or
+4. Importing a community pack they obtained directly from its publisher
+
+See `docs/install.md` for the user-side workflow.
+
+## 3 — Two compliance axes
+
+Two distinct legal axes govern what this project can include as first-party content:
+
+**The copyright axis** — addressed by the clean-room methodology in `docs/15-clean-room-engineering.md`. Concerns: did the implementation copy expression from a protected reference? Defended by: the analyst/implementer wall, fact-only spec extraction, the audit trail. This is what most open-source reverse-engineering legal work is about.
+
+**The §1201 / trade-secret axis** — addressed by *this* policy. Concerns: did the data flow upstream of the wall come from circumventing access controls, defeating runtime protection, or otherwise violating the source's terms of access? The wall in `docs/15` is downstream of access; it operates on what crosses it, not on how the source was obtained. A perfectly clean-room expression filter cannot cure an upstream §1201 problem.
+
+Path B's response is to remove the affected calibration data from the public distribution boundary. Removing the data is not a remedy for any past act; it is a forward-looking policy that ensures every artifact in the public repo passes **both** filters.
+
+## 4 — Acceptance criteria for first-party calibration packs
+
+Future contributions of first-party calibration packs (i.e., packs intended for inclusion in `definitions/<platform>/` in the public repo) must meet **all** of the following:
+
+1. **Copyright clean** — sourced via a path documented in `docs/15-clean-room-engineering.md` §3–8. Either:
+   - Generated by `tools/defgen/` from a genuine community RomRaider XML (license: GPL, treated as a fact source per §2 of `docs/15`), or
+   - Generated from a hardware-capture workflow on a ROM the contributor legally possesses, or
+   - Independently reverse-engineered from public protocol documentation and observation
+2. **§1201 clean** — no part of the data, or any upstream input that produced it, is downstream of an access-control circumvention against any commercial tuning tool (Atlas, COBB, EcuTek, HP Tuners, dealer software, etc.). This includes runtime instrumentation, decryption, debugger attaches, JIT inspection, or any technique that defeats a runtime protection mechanism.
+3. **Provenance documented** — the contribution's PR includes a paragraph stating the source (file paths, repo URLs, commit hashes), the tool used (`defgen` version, `loggergen` version, hardware capture device), and whether the contributor is the original author or is forwarding someone else's work. For forwarded work, name the upstream author.
+4. **Retraction-honoring** — if the upstream source revokes their license or asks for the pack's removal, the contributor agrees to file the retraction PR or accept maintainers doing so.
+5. **Provenance is an actual XML, not a heuristic.** A pack only ships if a real per-CID RomRaider XML (or hardware-capture-derived equivalent) covers the CID being packed. Speculative cousin-seeded packs derived by cloning a related pack's address layout and swapping CID-bearing fields do **not** meet this bar — they were tried in the 2026-05-19 session (commit `5139bea`, reverted in `1010a13`) and produced misleading body values for siblings whose calibration body addresses differed from the cousin. The cousin-seed tool at `tools/defgen/cousin_seed.py` remains in the repo as a private-research scaffold but its output is not for `definitions/`.
+
+These criteria apply going forward. They are not retroactive — see §3 for why retroactive application is not coherent.
+
+## 5 — What does not change
+
+Path B is a distribution-boundary change. It does **not** change:
+
+- **The tool's capability.** SubuwuTuner can load any conformant TOML pack the user provides, including packs they generate from any source. The tool does not fingerprint, watermark, restrict, or police user-side definition data.
+- **The clean-room methodology.** `docs/15-clean-room-engineering.md` is unchanged in its substance — it remains the operative policy for *implementation* code (`src/`, `tests/`, `tools/`). Path B applies to *bundled data*, not to code.
+- **The auto-tune kernels, flash orchestrator, brick protection, or any other safety-critical subsystem.** These are infrastructure; they ship as before.
+- **The jurisdiction-policy stance** in `docs/06-legal-ethics.md`. SubuwuTuner remains jurisdiction-neutral on emissions; engine-safety lints remain strict regardless of distribution posture.
+- **The analyst-side workflow** in `docs/15` and `docs/analyst-mode-prompt.md`. Analysts may still extract facts from protected references under the rules in `docs/15`; the resulting specs go to `D:\Subuwu\specs\`. Implementer sessions then build `src/` from those specs. The Path B boundary affects what *bundled data* lands in the public repo, not what the wall mechanism is for.
+
+## 6 — Where bundled data lives — three eras
+
+| Artifact | Pre-Path B (initial state) | Post-Path B (initial commit) | Post-2026-05-19 revision |
+|---|---|---|---|
+| Atlas-derived VA/VB packs (8 + 18 master) | public repo | private master at `D:\Subuwu\defs-private\` | unchanged — still private (Atlas-derived, fails §1201) |
+| Forum-sourced VA/VB packs via `tools/defgen/` | did not exist | did not exist | 25 packs in `definitions/impreza/` (7 LF + 18 LHB) |
+| `definitions/{impreza,forester,legacy,…}/` | public repo (Merp-derived community work) | unchanged — still public | unchanged — still public, now joined by FA-DIT WRX packs |
+| `definitions/pids.toml`, `definitions/ecuparams/` | public repo (community-sourced) | unchanged — still public | unchanged — still public |
+| `fixtures/demo-pack/` | public repo (synthetic, always-available example) | unchanged — still public | unchanged — still public |
+
+The git history of the public repo was rewritten to remove the Atlas-derived `definitions/va/` and `definitions/vb/` directories from all 143 commits as part of the initial Path B implementation. The pre-rewrite mirror is preserved at `D:\Subuwu\backup-pre-pathb.git` for the developer's reference; it is not a public artifact. The 2026-05-19 forum-sourced VA/VB packs are independent of that rewrite — they're generated fresh from a different (§1201-clean) upstream and live in `definitions/impreza/` rather than a re-instated `definitions/va/`.
+
+## 7 — Analyst-mode RE outputs (staged 2026-05-24, pending posture decision)
+
+A new category of material has appeared upstream of the public-repo distribution boundary: outputs from analyst-mode RE of the plaintext flash images themselves (not forum-sourced RR XML, not Atlas runtime instrumentation). Staged under `fixtures/private/findings_*` on 2026-05-24:
+
+| Artifact | Staged at | What it is | Promotion gate |
+|---|---|---|---|
+| Per-CID plaintext ROMs (24) | `fixtures/private/roms_plaintext_by_cid/` | OEM firmware images | Stays private regardless. Test fixtures only. |
+| SA algorithm structure + constants | `fixtures/private/findings_algorithms/generation-{A,B}-seed-to-key.md` | Gen-A 16-round Feistel + S-box; Gen-B AES-128 ECB + master keys | See `docs/23` § "Algorithm structure recovered" — decision pending between in-tree reference impl vs. plug-in distribution. |
+| Checksum recompute algorithm | `fixtures/private/findings_algorithms/checksum-recompute.md` | Algorithm matches existing `st::flash`; new info is per-generation byte-order + slot-offset gap | Algorithm is already in-tree (matches the existing flash module). Per-CID slot offsets are the missing data; can ship as a TOML lookup once the offsets are confirmed (brute-force scan is feasible per the analyst-side roadmap). |
+| Flash-at-rest cipher | `fixtures/private/findings_algorithms/flash-at-rest-cipher.md` | The cipher used to produce the plaintext ROMs in the first place | Stays private. This is the §1201-loaded one — the cipher is what the original at-rest protection circumvents. |
+| Per-CID flash region map (24) | `fixtures/private/findings_flash_region_map/` | Bootloader / Calibration / EEPROM / RAM / IO ranges per CID | Likely shippable as a TOML data file (factual partitioning, not expression). Same axis check as §4. |
+| Live-signal catalogs | `fixtures/private/findings_signals/` | 165 A-series + 786 B-series RAM signals with per-variant addresses + scaling | Same axis check as definitions. Eligible for `definitions/<platform>/logger/` shipping if §1201 axis clears. |
+| Cross-CID table-evolution map | `fixtures/private/findings_table_evolution/` | 18,791 (table, CID, address) triples | Analyst-side QA artifact; not a candidate for shipping. Useful as input to `tools/defgen/` cross-CID localization. |
+| Candidate per-CID definition XMLs | `fixtures/private/findings_definitions/` | Auto-extracted, byte-verified, and hybrid variants per CID | See that folder's README — two gates (copyright clean already; §1201 axis pending). |
+| UDS service catalog | `fixtures/private/findings_protocols/uds-catalog.md` | 20 standard SIDs + 5 OBD-II modes + manufacturer 0xA8/0xAA, NRC table | Pure protocol facts; eligible for in-tree shipping as a docs/13 / docs/24 cross-reference. |
+
+**Posture decision the developer owes the project.** The forum-sourced packs in `definitions/impreza/` (per §2) shipped because their upstream is an open RR XML community release — the §1201 axis is cleanly OK because the data was published openly upstream by its author. The analyst-mode outputs above have a *different* upstream (the analyst desktop's own RE pipeline against the plaintext ROMs), so the question that §2 implicitly answered yes-to for the forum packs needs answering again for this category. Two reasonable answers exist:
+
+- **Treat analyst-mode RE outputs as user-supplied data** (Path B posture extended). The plug-in seam for SA algorithm already exists; same pattern would apply to definitions, region maps, signals. Public repo loads, doesn't bundle.
+- **Treat analyst-mode RE outputs as eligible under §4 criteria.** The clean-room methodology in `docs/15` was specifically designed to produce wall-clean facts. If the wall did its job (and the Findings tree's vendor-neutral framing suggests it did), the §1201 axis is satisfied by the source being the firmware itself, not any commercial tool's runtime.
+
+The decision is forward-looking and equally valid for either answer. This document is updated to record the question; the implementation in `src/` does not change until the answer lands.
+
+## 8 — References
+
+- `docs/06-legal-ethics.md` — jurisdiction profiles, emissions stance, the broader legal posture this policy sits inside.
+- `docs/15-clean-room-engineering.md` — the analyst / implementer wall; this doc is the *distribution* axis, the wall is the *provenance* axis. They're orthogonal.
+- `docs/23-security-access.md` — the SA plug-in seam is the reference pattern for the "load user-supplied data at runtime" posture this policy adopts for definitions.
+- `docs/install.md` — the user-facing workflow for supplying a definition pack at runtime.
+- 17 U.S.C. § 1201 — the DMCA anti-circumvention provision driving the §1201 axis in §4 and §6.

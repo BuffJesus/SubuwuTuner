@@ -1,0 +1,19 @@
+[[axis]]
+id        = "rpm_axis"
+name      = "Engine speed"
+unit      = "rpm"
+type      = "static"
+address   = 0x0040
+length    = 4
+data_type = "uint16_be"
+scaling   = "rpm_x1"
+
+[[axis]]
+id        = "load_axis"
+name      = "Engine load"
+unit      = "g/rev"
+type      = "static"
+address   = 0x0050
+length    = 3
+data_type = "uint16_be"
+scaling   = "load_x001"

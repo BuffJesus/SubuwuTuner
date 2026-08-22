@@ -174,6 +174,25 @@ endif()
 if(ST_BUILD_GUI)
     install(TARGETS subuwutuner-gui
             RUNTIME DESTINATION ${ST_INSTALL_BIN_DIR})
+
+    # Runtime-discoverable offline resources. persistence.cpp resolves both
+    # flat Windows installs and bin/ + sibling-resource layouts; keep these
+    # beside the Windows executable so Help, changelog, "Try the demo", and
+    # Log Explorer's sample action work in the actual release package rather
+    # than only from a source checkout.
+    install(FILES "${CMAKE_SOURCE_DIR}/CHANGELOG.md" DESTINATION .)
+    install(DIRECTORY "${CMAKE_SOURCE_DIR}/docs/" DESTINATION docs
+            FILES_MATCHING PATTERN "*.md")
+    install(DIRECTORY "${CMAKE_SOURCE_DIR}/fixtures/demo.stune"
+            DESTINATION fixtures)
+    install(DIRECTORY "${CMAKE_SOURCE_DIR}/fixtures/demo-pack"
+            DESTINATION fixtures)
+    install(FILES
+            "${CMAKE_SOURCE_DIR}/fixtures/demo-knock-log.csv"
+            "${CMAKE_SOURCE_DIR}/fixtures/demo-coldstart-log.csv"
+            "${CMAKE_SOURCE_DIR}/fixtures/demo-adaptive-history.csv"
+            "${CMAKE_SOURCE_DIR}/fixtures/demo-ebcs-log.csv"
+            DESTINATION fixtures)
 endif()
 
 # No DLL-bundling step on Windows/MinGW: the C++ runtime (libstdc++ /

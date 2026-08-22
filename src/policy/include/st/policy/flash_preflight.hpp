@@ -46,6 +46,24 @@
 
 namespace st::policy {
 
+// Communication state observed during the pre-flash probe. Unknown is
+// intentionally non-blocking here: transports that cannot expose a reliable
+// state can still use the rest of the pipeline, while a live probe should set
+// one of the explicit states before a write is offered.
+enum class EcuCommunicationState {
+    Unknown,
+    Reachable,
+    IdentifiedButWriteRejected,
+    SilentBootFailure,
+};
+
+// Half-open flash range used by the readiness gate. `length == 0` is ignored
+// so callers can retain empty plan entries without creating a false blocker.
+struct FlashAddressRange {
+    std::uint64_t address{0};
+    std::uint64_t length{0};
+};
+
 // Inputs to every preflight validator. Construct one per flash attempt
 // from the application state (ECU live readout, project pack, vehicle
 // profile). Fields are intentionally optional — validators ignore
@@ -64,6 +82,30 @@ struct PreflightContext {
 
     std::optional<std::string> expected_vin{};
     std::optional<std::string> observed_vin{};
+
+    // Flashing requires both sides of ECU identity to be known. This is kept
+    // separate from EcuIdMatch so callers can still use that narrow validator
+    // for comparison-only flows.
+
+    // Result of the live communication probe. A silent boot failure means
+    // that the ECU produced no CAN/UDS response after power-cycle; this is an
+    // external boot/JTAG recovery state, not a reason to retry OBD writes.
+    std::optional<EcuCommunicationState> ecu_communication_state{};
+
+    // Positive proof fields for a write attempt. Unset and false both block
+    // the canonical pipeline: a flash should never proceed on an assumption.
+    std::optional<bool> definition_match_verified{};
+    std::optional<bool> source_image_verified{};
+    std::optional<bool> recovery_image_present{};
+    std::optional<bool> journal_safe{};
+
+    // Caller-approved write-eligible ranges and the ranges emitted by the
+    // flash plan. Every non-empty planned range must fit wholly inside one
+    // approved range. The host must populate these from the applicable flash
+    // policy/region model; do not blindly reuse [[writable_region]], which is
+    // currently a feature-codegen/patch-insertion allow-list only.
+    std::vector<FlashAddressRange> approved_write_regions{};
+    std::vector<FlashAddressRange> planned_write_ranges{};
 
     // Battery voltage reported by the transport device, in volts. When
     // unset, BatteryVoltageOk is a no-op. The default thresholds (warn
@@ -140,7 +182,14 @@ private:
 // than warn when in doubt); callers can override per-deployment.
 
 [[nodiscard]] Validator make_ecu_id_match();
+[[nodiscard]] Validator make_ecu_identity_known();
 [[nodiscard]] Validator make_vin_match(); // Warning-tier when expected set + observed unset.
+[[nodiscard]] Validator make_ecu_communication_safe();
+[[nodiscard]] Validator make_definition_match_verified();
+[[nodiscard]] Validator make_source_image_verified();
+[[nodiscard]] Validator make_recovery_image_present();
+[[nodiscard]] Validator make_journal_safe();
+[[nodiscard]] Validator make_write_regions_safe();
 
 // Battery thresholds in volts. `warn_below` defaults to 12.0 V
 // (resting); `block_below` defaults to 11.5 V (engine cranking can dip
@@ -169,7 +218,14 @@ private:
 // Stable category strings used in Diagnostic::category(). Round-trip
 // safe; UI/CLI consumers can group on these.
 inline constexpr char kCatEcuIdMatch[] = "ecu_id_match";
+inline constexpr char kCatEcuIdentityKnown[] = "ecu_identity_known";
 inline constexpr char kCatVinMatch[] = "vin_match";
+inline constexpr char kCatEcuCommunication[] = "ecu_communication";
+inline constexpr char kCatDefinitionMatch[] = "definition_match";
+inline constexpr char kCatSourceImage[] = "source_image";
+inline constexpr char kCatRecoveryImage[] = "recovery_image";
+inline constexpr char kCatJournalSafety[] = "journal_safety";
+inline constexpr char kCatWriteRegions[] = "write_regions";
 inline constexpr char kCatBatteryVoltage[] = "battery_voltage";
 inline constexpr char kCatIgnitionOn[] = "ignition_on";
 inline constexpr char kCatChecksumKnown[] = "checksum_known";
@@ -186,6 +242,13 @@ struct ValidatorDescription {
     std::string_view description;         // 1-line summary
     std::string_view default_thresholds;  // empty when not numerically gated
     std::string_view skip_when;           // condition under which the validator no-ops
+    // Condition under which the validator emits a Blocker. Distinct from
+    // `skip_when` and NOT its negation: an always-on proof validator (see
+    // `make_required_proof`) refuses on missing evidence rather than
+    // skipping, so it populates this field and leaves `skip_when` empty.
+    // Conflating the two tells an operator that absent evidence waives the
+    // check, when it actually refuses the write.
+    std::string_view blocks_when;
 };
 
 // Returns the static inventory of validators that `default_pipeline()`

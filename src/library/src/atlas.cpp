@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <fstream>
 #include <ios>
+#include <regex>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -249,6 +250,32 @@ AtlasSafetyPair const *Atlas::find_safety_pair(std::string_view id) const noexce
         }
     }
     return nullptr;
+}
+
+std::vector<AtlasSafetyPair const *>
+Atlas::safety_pairs_for_table(std::string_view display_name) const {
+    std::vector<AtlasSafetyPair const *> matches;
+    std::string const name{display_name};
+    for (auto const &pair : safety_pairs_) {
+        bool matched = false;
+        auto inspect = [&](std::vector<std::string> const &patterns) {
+            for (auto const &pattern : patterns) {
+                try {
+                    if (std::regex_search(name, std::regex{pattern, std::regex::icase})) {
+                        return true;
+                    }
+                } catch (std::regex_error const &) {
+                    // A bad evidence pattern is non-authoritative metadata.
+                }
+            }
+            return false;
+        };
+        matched = inspect(pair.lhs_patterns) || inspect(pair.rhs_patterns);
+        if (matched) {
+            matches.push_back(&pair);
+        }
+    }
+    return matches;
 }
 
 AtlasAnchor const *Atlas::find_anchor(std::string_view id) const noexcept {

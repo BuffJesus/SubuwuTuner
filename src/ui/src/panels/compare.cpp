@@ -58,6 +58,7 @@ namespace {
 inline constexpr char const *kProjectSourceSentinel = "<project source>";
 inline constexpr char const *kProjectWorkingSentinel = "<project working>";
 inline constexpr char const *kProjectRomSentinelPrefix = "<project:";
+inline constexpr char const *kProjectCheckpointSentinelPrefix = "<project:checkpoint:";
 
 // Resolve a ROM path or sentinel against the active project. Returns
 // pointer-to-Rom for an in-memory source / working / additional-rom
@@ -89,6 +90,25 @@ RomResolution resolve_rom_input(AppState const &state, char const *path,
         }
         out.in_memory = &state.project->working_rom();
         out.ok = true;
+        return out;
+    }
+    if (sv.starts_with(kProjectCheckpointSentinelPrefix) && sv.ends_with(">")) {
+        if (!state.project.has_value()) {
+            error_msg = std::string{label} + ": no project loaded.";
+            return out;
+        }
+        std::string_view const id =
+            sv.substr(std::strlen(kProjectCheckpointSentinelPrefix),
+                      sv.size() - std::strlen(kProjectCheckpointSentinelPrefix) - 1);
+        for (auto const &checkpoint : state.project->checkpoints()) {
+            if (checkpoint.id == id) {
+                out.in_memory = &checkpoint.rom;
+                out.ok = true;
+                return out;
+            }
+        }
+        error_msg = std::string{label} + ": project has no checkpoint id '" +
+                    std::string{id} + "'.";
         return out;
     }
     if (sv.starts_with(kProjectRomSentinelPrefix) && sv.ends_with(">")) {
@@ -477,6 +497,29 @@ void render_compare_panel(AppState &state) {
                 ImGui::SameLine();
                 text_subtle("(%s)", r.id.c_str());
             }
+            ImGui::SameLine();
+            if (ImGui::SmallButton("\xE2\x86\x92 A")) {
+                std::snprintf(state.compare_rom_a_path, sizeof state.compare_rom_a_path, "%s",
+                              sentinel.c_str());
+            }
+            ImGui::SameLine();
+            if (ImGui::SmallButton("\xE2\x86\x92 B")) {
+                std::snprintf(state.compare_rom_b_path, sizeof state.compare_rom_b_path, "%s",
+                              sentinel.c_str());
+            }
+            ImGui::PopID();
+        }
+        for (auto const &checkpoint : state.project->checkpoints()) {
+            std::string const sentinel = std::string{kProjectCheckpointSentinelPrefix} +
+                                         checkpoint.id + ">";
+            char id_suffix[128];
+            std::snprintf(id_suffix, sizeof id_suffix, "cp_%s", checkpoint.id.c_str());
+            ImGui::PushID(id_suffix);
+            ImGui::AlignTextToFramePadding();
+            ImGui::Text("%s", checkpoint.display_name.empty() ? checkpoint.id.c_str()
+                                                              : checkpoint.display_name.c_str());
+            ImGui::SameLine();
+            text_subtle("(%s, %08X)", checkpoint.id.c_str(), checkpoint.crc32);
             ImGui::SameLine();
             if (ImGui::SmallButton("\xE2\x86\x92 A")) {
                 std::snprintf(state.compare_rom_a_path, sizeof state.compare_rom_a_path, "%s",

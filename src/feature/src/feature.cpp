@@ -8,6 +8,8 @@
 #include <toml++/toml.hpp>
 
 #include <algorithm>
+#include <fstream>
+#include <iterator>
 #include <sstream>
 #include <unordered_map>
 #include <utility>
@@ -281,6 +283,36 @@ Result<Graph> from_toml(std::string_view text) {
     }
 
     return g;
+}
+
+Status save_file(Graph const &g, std::filesystem::path const &path) {
+    std::ofstream out{path, std::ios::trunc};
+    if (!out) {
+        return failure(ErrorCode::IoFailure, "cannot open feature graph: " + path.string());
+    }
+    out << to_toml(g);
+    out.flush();
+    if (!out) {
+        return failure(ErrorCode::IoFailure, "cannot write feature graph: " + path.string());
+    }
+    return {};
+}
+
+Result<Graph> load_file(std::filesystem::path const &path) {
+    std::ifstream in{path, std::ios::binary};
+    if (!in) {
+        return failure(ErrorCode::FileNotFound, "cannot open feature graph: " + path.string());
+    }
+    // Read via rdbuf rather than istreambuf_iterator: GCC 15's -O3 inliner
+    // raises a false-positive -Werror=null-dereference on the iterator's
+    // streambuf access when constructing a std::string from the range.
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    if (in.fail() && !in.eof()) {
+        return failure(ErrorCode::IoFailure, "cannot read feature graph: " + path.string());
+    }
+    std::string const text = ss.str();
+    return from_toml(text);
 }
 
 NodeId Graph::add_node(Node node) {

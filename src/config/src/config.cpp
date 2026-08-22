@@ -46,11 +46,23 @@ std::optional<Config> &cached_state() {
 }
 
 [[nodiscard]] std::optional<std::string> env_var(char const *name) {
+#ifdef _WIN32
+    char *value = nullptr;
+    std::size_t value_size = 0;
+    if (_dupenv_s(&value, &value_size, name) != 0 || value == nullptr || *value == '\0') {
+        std::free(value);
+        return std::nullopt;
+    }
+    std::string result{value};
+    std::free(value);
+    return result;
+#else
     char const *v = std::getenv(name);
     if (v == nullptr || *v == '\0') {
         return std::nullopt;
     }
     return std::string{v};
+#endif
 }
 
 [[nodiscard]] std::filesystem::path user_home() {

@@ -188,9 +188,13 @@ Result<std::vector<VehicleProfile>> list(std::filesystem::path const &dir) {
 
 std::filesystem::path default_profile_dir() {
 #if defined(_WIN32)
-    char const *appdata = std::getenv("APPDATA");
-    if (appdata != nullptr) {
-        return std::filesystem::path{appdata} / "SubuwuTuner" / "profiles";
+    char *appdata = nullptr;
+    std::size_t appdata_size = 0;
+    if (_dupenv_s(&appdata, &appdata_size, "APPDATA") == 0 && appdata != nullptr) {
+        std::filesystem::path const result =
+            std::filesystem::path{appdata} / "SubuwuTuner" / "profiles";
+        std::free(appdata);
+        return result;
     }
     return std::filesystem::path{"profiles"};
 #else

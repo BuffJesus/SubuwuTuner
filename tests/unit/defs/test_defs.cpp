@@ -579,6 +579,140 @@ length  = 0x00010000
             std::string::npos);
 }
 
+TEST_CASE("Definition parses calibration_region as an exact-CID model",
+          "[defs][calibration_region]") {
+    auto const dr = st::Definition::from_toml_string(R"toml(
+[pack]
+id              = "demo"
+endianness      = "big"
+rom_size_bytes  = 0x200000
+
+[[calibration_region]]
+name       = "lf79002p-calibration"
+cid        = "LF79002P"
+address    = 0x10000
+length     = 0x1F0000
+status     = "approved"
+provenance = "analyst-byte-verified"
+)toml");
+    REQUIRE(dr.has_value());
+    REQUIRE(dr->validate().has_value());
+    REQUIRE(dr->calibration_regions().size() == 1);
+    auto const &region = dr->calibration_regions()[0];
+    REQUIRE(region.name == "lf79002p-calibration");
+    REQUIRE(region.cid == "LF79002P");
+    REQUIRE(region.status == "approved");
+    REQUIRE(region.provenance == "analyst-byte-verified");
+    REQUIRE(region.address == 0x10000);
+    REQUIRE(region.length == 0x1F0000);
+}
+
+TEST_CASE("Definition rejects incomplete calibration_region evidence",
+          "[defs][calibration_region]") {
+    auto const missing_provenance = st::Definition::from_toml_string(R"toml(
+[pack]
+id             = "demo"
+endianness     = "big"
+rom_size_bytes = 0x200000
+
+[[calibration_region]]
+name    = "candidate"
+cid     = "LF79002P"
+address = 0x10000
+length  = 0x1000
+)toml");
+    REQUIRE_FALSE(missing_provenance.has_value());
+    REQUIRE(missing_provenance.error().message().find("missing provenance") !=
+            std::string::npos);
+
+    auto const bad_status = st::Definition::from_toml_string(R"toml(
+[pack]
+id             = "demo"
+endianness     = "big"
+rom_size_bytes = 0x200000
+
+[[calibration_region]]
+name       = "candidate"
+cid        = "LF79002P"
+address    = 0x10000
+length     = 0x1000
+status     = "trusted"
+provenance = "user"
+)toml");
+    REQUIRE_FALSE(bad_status.has_value());
+    REQUIRE(bad_status.error().message().find("status must be candidate or approved") !=
+            std::string::npos);
+}
+
+TEST_CASE("Definition rejects duplicate exact-CID calibration regions",
+          "[defs][calibration_region]") {
+    auto const dr = st::Definition::from_toml_string(R"toml(
+[pack]
+id             = "demo"
+endianness     = "big"
+rom_size_bytes = 0x200000
+
+[[calibration_region]]
+name       = "calibration"
+cid        = "LF79002P"
+address    = 0x10000
+length     = 0x1000
+provenance = "first"
+
+[[calibration_region]]
+name       = "calibration"
+cid        = "LF79002P"
+address    = 0x11000
+length     = 0x1000
+provenance = "second"
+)toml");
+    REQUIRE(dr.has_value());
+    auto const validation = dr->validate();
+    REQUIRE_FALSE(validation.has_value());
+    REQUIRE(validation.error().message().find(
+                "calibration_region 'calibration' for cid 'LF79002P' is defined more than once") !=
+            std::string::npos);
+}
+
+TEST_CASE("Definition selects only approved calibration regions for exact CID",
+          "[defs][calibration_region]") {
+    auto const dr = st::Definition::from_toml_string(R"toml(
+[pack]
+id             = "demo"
+endianness     = "big"
+rom_size_bytes = 0x200000
+
+[[calibration_region]]
+name       = "approved"
+cid        = "LF79002P"
+address    = 0x10000
+length     = 0x1000
+status     = "approved"
+provenance = "verified"
+
+[[calibration_region]]
+name       = "candidate"
+cid        = "LF79002P"
+address    = 0x20000
+length     = 0x1000
+status     = "candidate"
+provenance = "needs-review"
+
+[[calibration_region]]
+name       = "other-cid"
+cid        = "LF79101P"
+address    = 0x30000
+length     = 0x1000
+status     = "approved"
+provenance = "other-family"
+)toml");
+    REQUIRE(dr.has_value());
+    auto const regions = dr->approved_calibration_regions("LF79002P");
+    REQUIRE(regions.size() == 1);
+    REQUIRE(regions[0]->name == "approved");
+    REQUIRE(dr->approved_calibration_regions("UNKNOWN").empty());
+}
+
 TEST_CASE("Definition::validate flags duplicate table role tags",
           "[defs][validate][role]") {
     // Two tables tagged with the same role would silently shadow at
@@ -678,6 +812,9 @@ TEST_CASE("Definition::matches finds an identification by CID bytes", "[defs][ma
     auto const result = dr->matches(rom);
     REQUIRE(result.has_value());
     REQUIRE(*result == "VA-WRX-MT 2019 (AS80U)");
+    auto const info = dr->match_info(rom);
+    REQUIRE(info.has_value());
+    REQUIRE(info->cid == "AS80U   ");
 }
 
 TEST_CASE("Definition::matches returns nullopt on no match", "[defs][matches]") {
@@ -2541,6 +2678,13 @@ TEST_CASE("definitions/impreza/lf79103p.toml declares an eligible fa24_swap work
     REQUIRE(fa24->display_name == "FA24 swap (VA WRX)");
     REQUIRE(fa24->modal == "fa24_swap");
     REQUIRE(fa24->required_tables.size() == 5);
+    REQUIRE(fa24->required_tables == std::vector<std::string>{
+        "engine_displacement",
+        "fuel_timing_hpfp_phase_transfer_curve",
+        "avcs_intake_barometric_multiplier_low_intake_cam_target_tgv_closed",
+        "avcs_intake_barometric_multiplier_high_intake_cam_target_tgv_closed",
+        "fuel_injectors_pulse_injector_mult_table",
+    });
     // Per-table presence — surfaces which id is missing if eligibility
     // breaks, instead of a single boolean failure.
     for (auto const &table_id : fa24->required_tables) {
@@ -2548,6 +2692,33 @@ TEST_CASE("definitions/impreza/lf79103p.toml declares an eligible fa24_swap work
         REQUIRE(d->find_table(table_id) != nullptr);
     }
     REQUIRE(d->supports_workflow("fa24_swap"));
+}
+
+TEST_CASE("FA24 swap workflow keeps the exact modal table contract on corrected siblings",
+          "[defs][workflow][in_tree]") {
+    std::vector<std::string> const expected{
+        "engine_displacement",
+        "fuel_timing_hpfp_phase_transfer_curve",
+        "avcs_intake_barometric_multiplier_low_intake_cam_target_tgv_closed",
+        "avcs_intake_barometric_multiplier_high_intake_cam_target_tgv_closed",
+        "fuel_injectors_pulse_injector_mult_table",
+    };
+    for (auto const pack_id : {"lf9d012h", "lf9l000e"}) {
+        auto const path = std::filesystem::path{ST_DEFINITIONS_DIR} / "impreza" /
+                          (std::string{pack_id} + ".toml");
+        std::error_code ec;
+        if (!std::filesystem::exists(path, ec)) {
+            WARN("corrected FA24 sibling pack not present — skipping: " << path.string());
+            continue;
+        }
+        CAPTURE(pack_id);
+        auto const d = st::Definition::from_file(path);
+        REQUIRE(d.has_value());
+        auto const *fa24 = d->find_workflow("fa24_swap");
+        REQUIRE(fa24 != nullptr);
+        REQUIRE(fa24->required_tables == expected);
+        REQUIRE(d->supports_workflow("fa24_swap"));
+    }
 }
 
 // Same test against lf79101p — verifies the extends chain actually
@@ -3013,4 +3184,71 @@ id = "b"
     REQUIRE(d->find_hook("a") != nullptr);
     REQUIRE(d->find_hook("b") != nullptr);
     REQUIRE(d->find_hook("c") == nullptr);
+}
+
+// ---------------------------------------------------------------------------
+// Scaling quantization boundaries (task 47 §ROM-editing #6). write_typed
+// clamps to the target type range then rounds half away from zero, and an
+// engineering value pushed through invert_scaling -> write_typed ->
+// read_typed -> apply_scaling snaps to the nearest representable raw step.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("write_typed rounds half away from zero and clamps to type range",
+          "[defs][write_typed][quantization]") {
+    auto rom = st::Rom::from_bytes(std::vector<std::uint8_t>(4, 0x00));
+
+    // Round half away from zero.
+    REQUIRE(st::write_typed(rom, 0, st::DataType::Uint8, 10.5).has_value());
+    REQUIRE(rom.data()[0] == 11);
+    REQUIRE(st::write_typed(rom, 0, st::DataType::Uint8, 10.4).has_value());
+    REQUIRE(rom.data()[0] == 10);
+    REQUIRE(st::write_typed(rom, 0, st::DataType::Uint8, 10.499).has_value());
+    REQUIRE(rom.data()[0] == 10);
+
+    // Negative half rounds away from zero.
+    REQUIRE(st::write_typed(rom, 1, st::DataType::Int8, -3.5).has_value());
+    REQUIRE(static_cast<std::int8_t>(rom.data()[1]) == -4);
+
+    // Clamp below/above the representable range instead of wrapping.
+    REQUIRE(st::write_typed(rom, 2, st::DataType::Uint8, 300.0).has_value());
+    REQUIRE(rom.data()[2] == 255);
+    REQUIRE(st::write_typed(rom, 2, st::DataType::Uint8, -5.0).has_value());
+    REQUIRE(rom.data()[2] == 0);
+    REQUIRE(st::write_typed(rom, 3, st::DataType::Int8, 200.0).has_value());
+    REQUIRE(static_cast<std::int8_t>(rom.data()[3]) == 127);
+    REQUIRE(st::write_typed(rom, 3, st::DataType::Int8, -200.0).has_value());
+    REQUIRE(static_cast<std::int8_t>(rom.data()[3]) == -128);
+}
+
+TEST_CASE("engineering value round-trips through invert/write/read/apply at "
+          "quantization boundaries",
+          "[defs][scaling][quantization]") {
+    st::Scaling s;
+    s.formula = st::LinearScaling{.factor = 0.5, .offset = 10.0};
+    s.data_type = st::DataType::Uint8;
+    // raw r -> 10 + 0.5*r: raw 0 -> 10.0, raw 1 -> 10.5, raw 2 -> 11.0.
+    auto rom = st::Rom::from_bytes(std::vector<std::uint8_t>(1, 0x00));
+
+    auto roundtrip = [&](double engineering) -> double {
+        auto const raw = st::invert_scaling(engineering, s);
+        REQUIRE(raw.has_value());
+        REQUIRE(st::write_typed(rom, 0, s.data_type, *raw).has_value());
+        auto const read = st::read_typed(rom, 0, s.data_type);
+        REQUIRE(read.has_value());
+        return st::apply_scaling(*read, s);
+    };
+
+    // Exactly on a representable step: round-trips exactly.
+    REQUIRE(roundtrip(11.0) == Catch::Approx(11.0));
+    REQUIRE(roundtrip(10.5) == Catch::Approx(10.5));
+
+    // Exactly between two steps (raw 1.5): half rounds away -> raw 2 -> 11.0.
+    REQUIRE(roundtrip(10.75) == Catch::Approx(11.0));
+    // Just below the midpoint snaps down to raw 1 -> 10.5.
+    REQUIRE(roundtrip(10.74) == Catch::Approx(10.5));
+
+    // Outside the representable engineering range clamps to the nearest raw
+    // endpoint (raw 0 = 10.0, raw 255 = 137.5) rather than wrapping.
+    REQUIRE(roundtrip(5.0) == Catch::Approx(10.0));
+    REQUIRE(roundtrip(200.0) == Catch::Approx(137.5));
 }

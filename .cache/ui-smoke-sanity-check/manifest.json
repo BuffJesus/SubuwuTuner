@@ -1,0 +1,25 @@
+﻿{
+    "executable":  "D:\\Subuwu\\code\\build\\win-clang-coherent\\bin\\subuwutuner-gui.exe",
+    "scenario":  "Welcome",
+    "project":  "",
+    "requested_window":  "640x400",
+    "pid":  9460,
+    "title":  "SubuwuTuner",
+    "responding":  true,
+    "stderr_empty":  true,
+    "stdout_bytes":  69,
+    "stderr_bytes":  0,
+    "termination":  "stopped-by-harness",
+    "exit_code":  null,
+    "screenshots":  [
+                        {
+                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke-sanity-check\\01-welcome.png",
+                            "width":  656,
+                            "height":  439,
+                            "bytes":  31824,
+                            "sampled_colors":  11,
+                            "non_black_ratio":  1,
+                            "sanity_passed":  true
+                        }
+                    ]
+}

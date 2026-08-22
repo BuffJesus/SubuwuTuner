@@ -4,9 +4,8 @@
 // Toast stack — bottom-right transient notifications above the status
 // bar. enqueue_toast is the cross-cutting entry point (actions/modals
 // call it); render_toasts owns the per-frame draw + click-to-dismiss.
-// tick_status_msg + mirror_status_change live here too because the
-// stderr mirror is conceptually part of the same "user-visible status"
-// surface.
+// tick_status_msg + mirror_status_change live here too because console
+// mirroring is conceptually part of the same "user-visible status" surface.
 
 #include "panels/panels.hpp"
 
@@ -32,13 +31,13 @@ namespace st::ui {
 constexpr double kStatusMsgTtlSeconds = 5.0;
 
 // Status-bar text + the Read-ROM-modal error string are both user-visible
-// surfaces; mirror every change to stderr so the console window that
-// opens alongside the GUI captures every user-visible status/error as a
-// copy-pasteable line. Heuristic: classify as `[err]` when the text
+// surfaces; mirror every change so the console/log capture contains each
+// user-visible event as a copy-pasteable line. Routine `[status]` messages go
+// to stdout; errors go to stderr so automation can trust a non-empty stderr
+// as a diagnostic signal. Heuristic: classify as `[err]` when the text
 // matches an error-flavored regex (Failed / Error / cannot / Invalid /
 // missing / Reject — same set other error sites use), otherwise
-// `[status]`. Both classifications land on stderr so the console
-// captures the full timeline.
+// `[status]`.
 //
 // Called from tick_status_msg() once per frame — cheap because the
 // fprintf only fires when `current` differs from the shadow `prev`.
@@ -64,15 +63,17 @@ void mirror_status_change(std::string const &current, std::string &prev,
         }
         return false;
     };
-    char const *severity = looks_like_error(current) ? "err" : "status";
-    std::fprintf(stderr, "[%s][%s] %s\n", severity, surface_label, current.c_str());
-    std::fflush(stderr);
+    bool const error = looks_like_error(current);
+    char const *severity = error ? "err" : "status";
+    std::FILE *stream = error ? stderr : stdout;
+    std::fprintf(stream, "[%s][%s] %s\n", severity, surface_label, current.c_str());
+    std::fflush(stream);
 }
 } // namespace
 
 void tick_status_msg(AppState &state) {
     double const now = ImGui::GetTime();
-    // Stderr-mirror every surface that carries a user-visible status
+    // Console-mirror every surface that carries a user-visible status
     // string, BEFORE the TTL pass — so the console captures the
     // message even if it's about to be auto-cleared this frame.
     // Both `status_msg` (the status bar) and `read_rom_error_msg`

@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <optional>
@@ -225,6 +226,83 @@ void render_sidebar(AppState &state) {
     ImGui::InputTextWithHint("##table_filter", "Filter tables…  (Ctrl+F)", state.table_filter,
                              sizeof state.table_filter, ImGuiInputTextFlags_EscapeClearsAll);
 
+    // Map Explorer facets. These only change discovery; they never alter
+    // edit or flash policy. Keep the common questions one click away:
+    // safety maps, emissions maps, tagged maps, and category.
+    {
+        auto const scope_label = [&]() -> char const * {
+            switch (state.table_explorer_scope) {
+            case TableExplorerScope::Safety:
+                return "Safety";
+            case TableExplorerScope::Emissions:
+                return "Emissions";
+            case TableExplorerScope::Tagged:
+                return "Any tagged";
+            case TableExplorerScope::All:
+            default:
+                return "All maps";
+            }
+        };
+        ImGui::SetNextItemWidth(128.0f);
+        if (ImGui::BeginCombo("##table_scope", scope_label())) {
+            auto const scope_item = [&](char const *label, TableExplorerScope value,
+                                        char const *hint) {
+                bool const selected = state.table_explorer_scope == value;
+                if (ImGui::Selectable(label, selected)) {
+                    state.table_explorer_scope = value;
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("%s", hint);
+                }
+                if (selected) {
+                    ImGui::SetItemDefaultFocus();
+                }
+            };
+            scope_item("All maps", TableExplorerScope::All, "Show every definition table.");
+            scope_item("Safety", TableExplorerScope::Safety,
+                       "Only engine-safety-critical tables.");
+            scope_item("Emissions", TableExplorerScope::Emissions,
+                       "Only emissions-relevant tables.");
+            scope_item("Any tagged", TableExplorerScope::Tagged,
+                       "Tables carrying either safety or emissions metadata.");
+            ImGui::EndCombo();
+        }
+        ImGui::SameLine();
+        std::vector<std::string_view> categories;
+        categories.reserve(8);
+        categories.emplace_back("All categories");
+        for (auto const &t : def.tables()) {
+            std::string_view const category =
+                t.category.empty() ? std::string_view{"Other"} : std::string_view{t.category};
+            if (std::find(categories.begin(), categories.end(), category) == categories.end()) {
+                categories.push_back(category);
+            }
+        }
+        char const *const category_label = state.table_explorer_category.empty()
+            ? "All categories" : state.table_explorer_category.c_str();
+        ImGui::SetNextItemWidth(-1.0f);
+        if (ImGui::BeginCombo("##table_category", category_label)) {
+            bool const all_selected = state.table_explorer_category.empty();
+            if (ImGui::Selectable("All categories", all_selected)) {
+                state.table_explorer_category.clear();
+            }
+            if (all_selected) {
+                ImGui::SetItemDefaultFocus();
+            }
+            for (std::size_t i = 1; i < categories.size(); ++i) {
+                std::string const label{categories[i]};
+                bool const selected = state.table_explorer_category == label;
+                if (ImGui::Selectable(label.c_str(), selected)) {
+                    state.table_explorer_category = label;
+                }
+                if (selected) {
+                    ImGui::SetItemDefaultFocus();
+                }
+            }
+            ImGui::EndCombo();
+        }
+    }
+
     // Right-aligned "Collapse all" affordance. One-shot — flips a flag
     // the render loop consumes for one frame to force every TreeNode
     // closed; persisted imgui.ini state takes over again next frame as
@@ -283,16 +361,43 @@ void render_sidebar(AppState &state) {
     }
 
     std::string_view const filter{state.table_filter};
+    auto const explorer_matches = [&](st::Table const &t) {
+        bool const text_match = filter.empty() || icontains(t.name, filter) ||
+                                icontains(t.id, filter);
+        std::string_view const category =
+            t.category.empty() ? std::string_view{"Other"} : std::string_view{t.category};
+        bool const category_match = state.table_explorer_category.empty() ||
+                                     category == state.table_explorer_category;
+        bool scope_match = true;
+        switch (state.table_explorer_scope) {
+        case TableExplorerScope::Safety:
+            scope_match = t.engine_safety_critical;
+            break;
+        case TableExplorerScope::Emissions:
+            scope_match = t.emissions_relevant;
+            break;
+        case TableExplorerScope::Tagged:
+            scope_match = t.engine_safety_critical || t.emissions_relevant;
+            break;
+        case TableExplorerScope::All:
+        default:
+            break;
+        }
+        return text_match && category_match && scope_match;
+    };
     // Count matches once so the active-filter header line can report
     // "N of M". When the filter is empty, the count is noise — the tree
     // below already conveys "how many tables" at a glance.
     std::size_t matched = 0;
     for (auto const &t : def.tables()) {
-        if (filter.empty() || icontains(t.name, filter) || icontains(t.id, filter)) {
+        if (explorer_matches(t)) {
             ++matched;
         }
     }
-    if (!filter.empty()) {
+    bool const explorer_filter_active =
+        !filter.empty() || state.table_explorer_scope != TableExplorerScope::All ||
+        !state.table_explorer_category.empty();
+    if (explorer_filter_active) {
         text_subtle("%zu of %zu tables", matched, def.tables().size());
         ImGui::Separator();
     }
@@ -347,9 +452,13 @@ void render_sidebar(AppState &state) {
         }
     }
 
-    if (!filter.empty() && matched == 0) {
+    if (explorer_filter_active && matched == 0) {
         char title[80];
-        std::snprintf(title, sizeof title, "No tables match \"%s\"", state.table_filter);
+        if (!filter.empty()) {
+            std::snprintf(title, sizeof title, "No tables match \"%s\"", state.table_filter);
+        } else {
+            std::snprintf(title, sizeof title, "No maps match the active facets");
+        }
         render_empty_state(
             title,
             "Try a shorter prefix, or press Esc to clear the filter.");
@@ -411,9 +520,7 @@ void render_sidebar(AppState &state) {
         groups = std::move(reordered);
     }
 
-    auto const table_matches = [&](st::Table const &t) {
-        return filter.empty() || icontains(t.name, filter) || icontains(t.id, filter);
-    };
+    auto const table_matches = explorer_matches;
 
     auto const render_table_row = [&](st::Table const &t) {
         bool const selected = state.selected_table_id == t.id;
@@ -503,10 +610,26 @@ void render_sidebar(AppState &state) {
             if (!t.category.empty()) {
                 text_subtle("category: %s", t.category.c_str());
             }
+            if (t.role.has_value()) {
+                text_subtle("role: %s", t.role->c_str());
+            }
+            if (t.axis_x.has_value() || t.axis_y.has_value() || t.axis_z.has_value()) {
+                text_subtle("axes: %s%s%s",
+                            t.axis_x.has_value() ? t.axis_x->c_str() : "—",
+                            t.axis_y.has_value() ? " / " : "",
+                            t.axis_y.has_value() ? t.axis_y->c_str() : "");
+                if (t.axis_z.has_value()) {
+                    text_subtle("axis Z: %s", t.axis_z->c_str());
+                }
+            }
             if (t.engine_safety_critical) {
                 ImGui::TextColored(chip_fg_warn(), "engine safety critical");
             } else if (t.emissions_relevant) {
                 ImGui::TextColored(chip_fg_caution(), "emissions-relevant");
+            }
+            if (t.notes.has_value() && !t.notes->empty()) {
+                ImGui::Separator();
+                ImGui::TextWrapped("%s", t.notes->c_str());
             }
             // Atlas roll-up in the tooltip — purpose + FA24 + a
             // compact cluster list. Lets the user preview the
@@ -518,6 +641,32 @@ void render_sidebar(AppState &state) {
                 if (!atlas_entry->purpose.empty()) {
                     ImGui::TextWrapped("%s", atlas_entry->purpose.c_str());
                 }
+                if (!atlas_entry->units.empty()) {
+                    text_subtle("unit: %s", atlas_entry->units.c_str());
+                }
+                bool const primary_address_match =
+                    atlas_entry->address == static_cast<std::uint32_t>(t.address);
+                ImGui::TextColored(primary_address_match ? chip_fg_ok() : chip_fg_caution(),
+                                   "confidence: %s",
+                                   primary_address_match ? "Attested address" : "Inferred identity");
+                text_subtle("provenance: consolidated tuner corpus / %s",
+                            shared_atlas()->generated().empty()
+                                ? "generation date unavailable"
+                                : shared_atlas()->generated().c_str());
+                if (!atlas_entry->primary_cid.empty() || !atlas_entry->cid_addresses.empty()) {
+                    std::string coverage = atlas_entry->primary_cid.empty()
+                                               ? shared_atlas()->primary_cid()
+                                               : atlas_entry->primary_cid;
+                    for (auto const &binding : atlas_entry->cid_addresses) {
+                        if (!coverage.empty()) {
+                            coverage += ", ";
+                        }
+                        coverage += binding.cid;
+                    }
+                    text_subtle("exact-CID bindings: %s", coverage.c_str());
+                }
+                text_subtle("sibling variance: %s",
+                            atlas_entry->high_variance ? "high" : "not flagged high");
                 if (atlas_entry->common_core) {
                     text_subtle("\xE2\x98\x85 common-core");
                 }
@@ -535,6 +684,12 @@ void render_sidebar(AppState &state) {
                         joined += atlas_entry->clusters[i];
                     }
                     text_subtle("tuners: %s", joined.c_str());
+                }
+                if (!atlas_entry->co_edits.empty()) {
+                    ImGui::TextUnformatted("Common co-edits:");
+                    for (auto const &related : atlas_entry->co_edits) {
+                        ImGui::BulletText("%s", related.c_str());
+                    }
                 }
             }
             ImGui::EndTooltip();
@@ -652,7 +807,7 @@ void render_sidebar(AppState &state) {
                           group_matched, g.indices.size(),
                           static_cast<int>(g.name.size()), g.name.data());
         }
-        if (!filter.empty()) {
+        if (explorer_filter_active) {
             ImGui::SetNextItemOpen(true, ImGuiCond_Always);
         } else if (state.sidebar_collapse_all_request) {
             // One-shot "Collapse all" overrides imgui.ini.
@@ -768,7 +923,7 @@ void render_sidebar(AppState &state) {
                           top_matched, tg.total_tables,
                           static_cast<int>(tg.name.size()), tg.name.data());
         }
-        if (!filter.empty()) {
+        if (explorer_filter_active) {
             ImGui::SetNextItemOpen(true, ImGuiCond_Always);
         } else if (state.sidebar_collapse_all_request) {
             // One-shot "Collapse all" — closes top-level too. Filter

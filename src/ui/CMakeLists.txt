@@ -120,6 +120,7 @@ add_executable(subuwutuner-gui
     src/panels/table_view.cpp
     src/panels/toasts.cpp
     src/panels/welcome.cpp
+    src/panels/readiness.cpp
     src/panels/workspace.cpp
     src/panels/ets_browser.cpp
     src/panels/library.cpp
@@ -174,11 +175,13 @@ target_link_libraries(subuwutuner-gui
         st::diff
         st::edit
         st::flash
+        st::tune_export
         st::policy
         st::project
         st::autotune
         st::audit
         st::feature
+        st::feature_codegen
         st::log
         st::profile
         st::ai

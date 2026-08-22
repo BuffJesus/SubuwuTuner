@@ -765,7 +765,7 @@ TEST_CASE("CLI list-validators --json emits subuwutuner.list-validators.v1 schem
     REQUIRE(r.spawned);
     REQUIRE(r.exit_code == 0);
     REQUIRE(stdout_contains(r, "\"schema\":\"subuwutuner.list-validators.v1\""));
-    REQUIRE(stdout_contains(r, "\"count\":7"));
+    REQUIRE(stdout_contains(r, "\"count\":14"));
     REQUIRE(stdout_contains(r, "\"battery_voltage\""));
 }
 

@@ -1,0 +1,56 @@
+[profile]
+schema_version = 1
+id = "2017-wrx-pushbutton"
+platform = "subaru.wrx"
+years = [2017]
+start_system = "push_button"
+registration_class = "type_d"
+source = "2017 Subaru WRX/STI Service Manual"
+
+[[module]]
+id = "ecm"
+required_to_start = true
+identity_bearing = true
+replacement_requires_registration = true
+[[module]]
+id = "body_integrated_unit"
+required_to_start = true
+identity_bearing = true
+replacement_requires_registration = true
+[[module]]
+id = "keyless_access_control_module"
+required_to_start = true
+identity_bearing = true
+replacement_requires_registration = true
+[[module]]
+id = "id_code_box"
+required_to_start = true
+identity_bearing = true
+replacement_requires_registration = true
+
+[[link]]
+from = "body_integrated_unit"
+to = "ecm"
+transport = "dedicated_immobilizer_circuit"
+endpoint = "ECM E158-43"
+purpose = "start_authorization"
+
+[[effect]]
+id = "immobilizer_fuel_cut"
+commanded_by = "immobilizer_system"
+observed_by = "ecm"
+inhibits = ["fuel_injection"]
+observable = "ECM current-data item: Immobilizer Fuel Cut Status"
+
+[[dtc]]
+code = "B1571"
+meaning = "reference code incompatibility between body integrated unit and ECM"
+[[dtc]]
+code = "B1572"
+meaning = "communication failure between body integrated unit and ECM"
+[[dtc]]
+code = "B2785"
+meaning = "LIN communication in keyless access/push-button system"
+[[dtc]]
+code = "B2789"
+meaning = "ID code box communication"

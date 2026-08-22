@@ -1,0 +1,22 @@
+﻿{
+    "executable":  "D:\\Subuwu\\code\\build\\win-clang-coherent\\bin\\subuwutuner-gui.exe",
+    "scenario":  "Welcome",
+    "project":  "",
+    "requested_window":  "800x600",
+    "pid":  10744,
+    "title":  "SubuwuTuner",
+    "responding":  true,
+    "stderr_empty":  true,
+    "stdout_bytes":  69,
+    "stderr_bytes":  0,
+    "termination":  "stopped-by-harness",
+    "exit_code":  null,
+    "screenshots":  [
+                        {
+                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke-manifest-check\\01-welcome.png",
+                            "width":  800,
+                            "height":  600,
+                            "bytes":  38453
+                        }
+                    ]
+}

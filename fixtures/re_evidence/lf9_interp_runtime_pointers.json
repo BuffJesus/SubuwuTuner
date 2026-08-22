@@ -1,0 +1,26 @@
+{
+  "schema": "subuwutuner.rom-pointer-evidence.v1",
+  "family": "LF9C/D/G/L",
+  "records": [
+    {"cid":"LF9C102P","label":"interp_4x8_runtime","pointers":[
+      {"literal_address":"0x9E2A8","target":"0x6877C"},
+      {"literal_address":"0x9E2B4","target":"0xFFF88E16"},
+      {"literal_address":"0x9E2B0","target":"0xFFF88E24"},
+      {"literal_address":"0x82210","target":"0xFFF88EC8"}]},
+    {"cid":"LF9D012H","label":"interp_4x8_runtime","pointers":[
+      {"literal_address":"0xA81B4","target":"0x6AAC8"},
+      {"literal_address":"0xA81C0","target":"0xFFF88F16"},
+      {"literal_address":"0xA81BC","target":"0xFFF88F24"},
+      {"literal_address":"0x84F74","target":"0xFFF88FC8"}]},
+    {"cid":"LF9G003T","label":"interp_4x8_runtime","pointers":[
+      {"literal_address":"0xB5604","target":"0x772DC"},
+      {"literal_address":"0xB5610","target":"0xFFF890E6"},
+      {"literal_address":"0xB560C","target":"0xFFF890F4"},
+      {"literal_address":"0x917C0","target":"0xFFF89198"}]},
+    {"cid":"LF9L000E","label":"interp_4x8_runtime","pointers":[
+      {"literal_address":"0xB5970","target":"0x77444"},
+      {"literal_address":"0xB597C","target":"0xFFF89276"},
+      {"literal_address":"0xB5978","target":"0xFFF89284"},
+      {"literal_address":"0x91A44","target":"0xFFF89328"}]}
+  ]
+}

@@ -4,6 +4,7 @@
 #include <st/policy/flash_preflight.hpp>
 
 #include <cstdio>
+#include <limits>
 #include <string>
 #include <utility>
 
@@ -42,6 +43,19 @@ Validator make_ecu_id_match() {
     };
 }
 
+Validator make_ecu_identity_known() {
+    return [](PreflightContext const &ctx) -> std::vector<Diagnostic> {
+        if (!ctx.expected_ecu_id || ctx.expected_ecu_id->empty() ||
+            !ctx.observed_ecu_id || ctx.observed_ecu_id->empty()) {
+            return {Diagnostic{
+                Severity::Blocker, kCatEcuIdentityKnown,
+                "The expected and observed ECU calibration IDs are both required "
+                "before a write. Identify the exact ECU and definition first."}};
+        }
+        return {};
+    };
+}
+
 Validator make_vin_match() {
     return [](PreflightContext const &ctx) -> std::vector<Diagnostic> {
         if (!ctx.expected_vin) {
@@ -59,6 +73,122 @@ Validator make_vin_match() {
         return {Diagnostic{Severity::Blocker, kCatVinMatch,
                            "VIN mismatch: source ROM encodes '" + *ctx.expected_vin +
                                "', connected ECU reports '" + *ctx.observed_vin + "'."}};
+    };
+}
+
+Validator make_ecu_communication_safe() {
+    return [](PreflightContext const &ctx) -> std::vector<Diagnostic> {
+        if (!ctx.ecu_communication_state ||
+            *ctx.ecu_communication_state == EcuCommunicationState::Unknown ||
+            *ctx.ecu_communication_state == EcuCommunicationState::Reachable) {
+            return {};
+        }
+
+        if (*ctx.ecu_communication_state == EcuCommunicationState::SilentBootFailure) {
+            return {Diagnostic{
+                Severity::Blocker, kCatEcuCommunication,
+                "The ECU is silent after power-cycle: no CAN/UDS response was observed. "
+                "Refusing blind OBD writes; preserve logs and use the exact external "
+                "boot/JTAG recovery path for this ECU."}};
+        }
+
+        return {Diagnostic{
+            Severity::Blocker, kCatEcuCommunication,
+            "The ECU was identified, but programming was rejected. Refusing repeated "
+            "blind retries; preserve the stock image and obtain a documented recovery "
+            "procedure for this exact ECU."}};
+    };
+}
+
+namespace {
+
+Validator make_required_proof(std::optional<bool> PreflightContext::*field,
+                              char const *category,
+                              char const *label,
+                              char const *next_action) {
+    return [field, category, label, next_action](PreflightContext const &ctx)
+               -> std::vector<Diagnostic> {
+        auto const &value = ctx.*field;
+        if (!value || !*value) {
+            return {Diagnostic{Severity::Blocker, category,
+                               std::string{label} + " has not been positively verified. " +
+                                   next_action}};
+        }
+        return {};
+    };
+}
+
+} // namespace
+
+Validator make_definition_match_verified() {
+    return make_required_proof(&PreflightContext::definition_match_verified,
+                                kCatDefinitionMatch, "Definition match",
+                                "Refusing to write until the exact CID and definition pack "
+                                "are confirmed.");
+}
+
+Validator make_source_image_verified() {
+    return make_required_proof(&PreflightContext::source_image_verified,
+                                kCatSourceImage, "Source image",
+                                "Preserve and verify the source image before continuing.");
+}
+
+Validator make_recovery_image_present() {
+    return make_required_proof(&PreflightContext::recovery_image_present,
+                                kCatRecoveryImage, "Recovery image",
+                                "Provide an exact-CID stock or otherwise approved recovery "
+                                "image.");
+}
+
+Validator make_journal_safe() {
+    return make_required_proof(&PreflightContext::journal_safe, kCatJournalSafety,
+                                "Flash journal", "Resolve or explicitly resume the interrupted "
+                                "flash journal before starting another write.");
+}
+
+Validator make_write_regions_safe() {
+    return [](PreflightContext const &ctx) -> std::vector<Diagnostic> {
+        if (ctx.planned_write_ranges.empty()) {
+            return {};
+        }
+        if (ctx.approved_write_regions.empty()) {
+            return {Diagnostic{
+                Severity::Blocker, kCatWriteRegions,
+                "The flash plan contains writes but no approved flash write regions "
+                "were supplied. Refusing to write outside an explicit address "
+                "allow-list."}};
+        }
+
+        for (auto const &planned : ctx.planned_write_ranges) {
+            if (planned.length == 0 ||
+                planned.address > std::numeric_limits<std::uint64_t>::max() - planned.length) {
+                return {Diagnostic{
+                    Severity::Blocker, kCatWriteRegions,
+                    "The flash plan contains an invalid or overflowing write range. "
+                    "Refusing to emit a plan with an unsafe address extent."}};
+            }
+
+            auto const planned_end = planned.address + planned.length;
+            bool contained = false;
+            for (auto const &region : ctx.approved_write_regions) {
+                if (region.length == 0 ||
+                    region.address > std::numeric_limits<std::uint64_t>::max() - region.length) {
+                    continue;
+                }
+                auto const region_end = region.address + region.length;
+                if (planned.address >= region.address && planned_end <= region_end) {
+                    contained = true;
+                    break;
+                }
+            }
+            if (!contained) {
+                return {Diagnostic{
+                    Severity::Blocker, kCatWriteRegions,
+                    "The flash plan contains a range outside every approved flash write "
+                    "region, or spans a region boundary. Refusing the write."}};
+            }
+        }
+        return {};
     };
 }
 
@@ -168,7 +298,14 @@ Validator make_write_extent_sane(double warn_fraction, double block_fraction) {
 Pipeline default_pipeline() {
     Pipeline p;
     p.add(make_ecu_id_match())
+        .add(make_ecu_identity_known())
         .add(make_vin_match())
+        .add(make_ecu_communication_safe())
+        .add(make_definition_match_verified())
+        .add(make_source_image_verified())
+        .add(make_recovery_image_present())
+        .add(make_journal_safe())
+        .add(make_write_regions_safe())
         .add(make_battery_voltage_ok())
         .add(make_ignition_on())
         .add(make_checksum_known())
@@ -182,32 +319,54 @@ std::vector<ValidatorDescription> available_validators() {
         {kCatEcuIdMatch, "EcuIdMatch",
          "Refuses if the ECU reports a calibration id different from the "
          "source ROM's pack metadata.",
-         "", "expected_ecu_id or observed_ecu_id unset"},
+         "", "expected_ecu_id or observed_ecu_id unset", ""},
+        {kCatEcuIdentityKnown, "EcuIdentityKnown",
+         "Requires both expected and observed calibration IDs before a write.",
+         "", "", "expected_ecu_id or observed_ecu_id unset/empty"},
         {kCatVinMatch, "VinMatch",
          "Warns if the host has an expected VIN but the ECU did not report "
          "one; blocks on a hard mismatch.",
-         "", "expected_vin or observed_vin unset"},
+         "", "expected_vin or observed_vin unset", ""},
+        {kCatEcuCommunication, "EcuCommunicationSafe",
+         "Refuses blind writes after a programming rejection or silent boot "
+         "failure; directs the operator to documented recovery.",
+         "", "ecu_communication_state unset, Unknown, or Reachable", ""},
+        {kCatDefinitionMatch, "DefinitionMatchVerified",
+         "Requires positive confirmation that the exact definition matches the ECU.",
+         "", "", "definition_match_verified unset or false"},
+        {kCatSourceImage, "SourceImageVerified",
+         "Requires a preserved and verified source image for the write.",
+         "", "", "source_image_verified unset or false"},
+        {kCatRecoveryImage, "RecoveryImagePresent",
+         "Requires an exact-CID stock or approved recovery image.",
+         "", "", "recovery_image_present unset or false"},
+        {kCatJournalSafety, "JournalSafe",
+         "Refuses a new write while an interrupted flash journal is unresolved.",
+         "", "", "journal_safe unset or false"},
+        {kCatWriteRegions, "WriteRegionsSafe",
+         "Requires every planned write range to fit inside one approved flash write region.",
+         "", "planned_write_ranges empty or all ranges contained", ""},
         {kCatBatteryVoltage, "BatteryVoltageOk",
          "Refuses below the engine-cranking-safe floor; warns below the "
          "resting-target floor.",
          "block_below=11.5 V, warn_below=12.0 V",
-         "battery_voltage_v not reported by transport"},
+         "battery_voltage_v not reported by transport", ""},
         {kCatIgnitionOn, "IgnitionOn",
          "Refuses when the transport reports ignition off (no engine "
          "control while writing = unsafe).",
-         "", "ignition_on not reported by transport"},
+         "", "ignition_on not reported by transport", ""},
         {kCatChecksumKnown, "ChecksumKnown",
          "Refuses if the host doesn't know how to recompute the ECU's "
          "checksum (post-write verify would fail).",
-         "", "checksum_strategy_known unset"},
+         "", "checksum_strategy_known unset", ""},
         {kCatBackupPresent, "BackupPresent",
          "Refuses without a fresh verified backup of the connected ECU.",
-         "", "backup_present unset"},
+         "", "backup_present unset", ""},
         {kCatWriteExtent, "WriteExtentSane",
          "Warns if the plan would write more than 80% of the ROM; blocks "
          "if it exceeds 100% (impossible without an addressing bug).",
          "warn_fraction=0.80, block_fraction=1.00",
-         "bytes_to_write or source_rom_size unset"},
+         "bytes_to_write or source_rom_size unset", ""},
     };
 }
 

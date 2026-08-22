@@ -1,0 +1,22 @@
+{
+  "schema": "subuwutuner.rom-semantic-evidence.v1",
+  "family": "LF9C/D/G/L",
+  "image_base": "0x6000",
+  "policy": {
+    "reviewed_proposals": true,
+    "automatic_application_authorized": false
+  },
+  "candidates": [
+    {
+      "proposed_name": "checksum8_table_validate_ff",
+      "size": 36,
+      "body_sha256": "c8ea67725c004c7c0bc48b95271666c724c8d2dade2f79681215f581f02e0967",
+      "locations": [
+        {"cid": "LF9C102P", "address": "0xBF192"},
+        {"cid": "LF9D012H", "address": "0xC7546"},
+        {"cid": "LF9G003T", "address": "0xD4F86"},
+        {"cid": "LF9L000E", "address": "0xD56DA"}
+      ]
+    }
+  ]
+}

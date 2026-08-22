@@ -1,0 +1,66 @@
+{
+  "schema": "subuwutuner.rom-semantic-evidence.v1",
+  "family": "LF9C/D/G/L",
+  "image_base": "0x6000",
+  "policy": {
+    "reviewed_proposals": true,
+    "automatic_application_authorized": false
+  },
+  "candidates": [
+    {
+      "proposed_name": "affine_u16_x8_minus_0x5000_div5_sat",
+      "size": 34,
+      "body_sha256": "d3d3e791ed0c89056d815fd6f361eb9a9f00214f991dd93e79ad3bb8d0b1a15e",
+      "locations": [
+        {"cid": "LF9C102P", "address": "0x8214C"},
+        {"cid": "LF9D012H", "address": "0x84EB0"},
+        {"cid": "LF9G003T", "address": "0x916FC"},
+        {"cid": "LF9L000E", "address": "0x91980"}
+      ]
+    },
+    {
+      "proposed_name": "clamp_u16",
+      "size": 22,
+      "body_sha256": "c9e9aff35f751d5b30c75c6cb4fa4672c8ce0c2a2fb9b58891fcd804b2924c11",
+      "locations": [
+        {"cid": "LF9C102P", "address": "0x6FB8"},
+        {"cid": "LF9D012H", "address": "0x6FB8"},
+        {"cid": "LF9G003T", "address": "0x6F80"},
+        {"cid": "LF9L000E", "address": "0x6F80"}
+      ]
+    },
+    {
+      "proposed_name": "linear_interp_u16",
+      "size": 66,
+      "body_sha256": "d2539e96145280b27d46f832e250a598a12b0e34a37ad7d0456cce47afbcc014",
+      "locations": [
+        {"cid": "LF9C102P", "address": "0x6F54"},
+        {"cid": "LF9D012H", "address": "0x6F54"},
+        {"cid": "LF9G003T", "address": "0x6F1C"},
+        {"cid": "LF9L000E", "address": "0x6F1C"}
+      ]
+    },
+    {
+      "proposed_name": "interp2d_s16_table_u32_u16_axes",
+      "size": 198,
+      "body_sha256": "aac958d2dbe1dab9237247736893e655d91163d4483482d67f2f92ba02336f62",
+      "locations": [
+        {"cid": "LF9C102P", "address": "0x6778"},
+        {"cid": "LF9D012H", "address": "0x6778"},
+        {"cid": "LF9G003T", "address": "0x6778"},
+        {"cid": "LF9L000E", "address": "0x6778"}
+      ]
+    },
+    {
+      "proposed_name": "interp2d_s16_table_u16_axes",
+      "size": 218,
+      "body_sha256": "084056e9a481037452e5e6b62daf873ab0fb643ee4f6f85c2243ab9ed9e5ab7d",
+      "locations": [
+        {"cid": "LF9C102P", "address": "0x71D8"},
+        {"cid": "LF9D012H", "address": "0x72BC"},
+        {"cid": "LF9G003T", "address": "0x7284"},
+        {"cid": "LF9L000E", "address": "0x7284"}
+      ]
+    }
+  ]
+}

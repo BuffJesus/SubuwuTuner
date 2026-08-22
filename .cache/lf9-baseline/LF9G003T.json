@@ -1,0 +1,27 @@
+{
+  "schema": "subuwutuner.rom-decompile-baseline.v1",
+  "source": {
+    "path": "D:\\Subuwu\\findings\\engine-ecu-rom-plaintext\\2020_LF9G003T\\rom.bin",
+    "size": 2596864,
+    "sha256": "d165bec2b9fb33b7cbb00c8c9b1233bed8ce850a592465c25af70e42cf478b29",
+    "image_base": 24576,
+    "image_end_exclusive": 2621440
+  },
+  "index": {
+    "path": "D:\\Subuwu\\findings\\decompile\\lf9g003t\\function_index_named.txt",
+    "program": "LF9G003T.bin",
+    "language": "SuperH:BE:32:SH-2A",
+    "base": 0,
+    "modeled_memory_bytes": 6791168,
+    "function_count": 7366,
+    "named_function_count": 218,
+    "unnamed_function_count": 7148,
+    "functions_within_source_mapping": 7366,
+    "functions_outside_source_mapping": 0,
+    "outside_source_addresses": []
+  },
+  "interpretation": {
+    "modeled_memory_is_source_size": false,
+    "modeled_memory_note": "Ghidra modeled-memory size includes added RAM/register blocks; source.size and source.sha256 identify the imported ROM bytes."
+  }
+}

@@ -26,6 +26,45 @@ into existing vector tables). RH850 codegen + patch insertion both gate
 on bench-rig work against a real ECU vector table for hardware
 validation. See *Current state* below for the granular matrix.
 
+## Application status update (2026-08-21)
+
+The desktop Custom Features Designer is now an application workflow rather
+than only a graph-canvas prototype. It provides pack-backed hook and primitive
+insertion, typed wires, pin defaults, selection and context menus, pan/zoom,
+graph validation/lint, and project-aware `.stmod` persistence. The editor
+tracks the current document and every graph mutation, repeats Save directly
+after the first path is chosen, reports filesystem failures, and confirms
+before Clear or Load discards unsaved work.
+
+The designer also exposes a **transient compile preview**. It lowers the graph,
+selects SH-2A or RH850 from the definition pack's platform id (including
+canonical dotted ids such as `subaru.va.wrx.mt`), compiles to an in-memory
+`PatchObject`, reports IR instruction/hook/code/RAM counts, runs the writable-
+region address gate, and exposes the lowered IR. Results are marked out of date
+when the graph changes. A zero-hook result is a caution, not success: the user
+must connect logic to a writable hook input. No preview action inserts bytes,
+changes a ROM, creates a flash plan, or talks to hardware.
+
+Persistence is owned by `feature::save_file` / `feature::load_file`, with tests
+for canonical round trips, missing files, and malformed documents. The live
+Windows Designer scenario autonomously exercises the palette, pack-backed
+nodes, compatible wiring, pin-default editing, lint transition, node/edge
+menus, compile preview, and both discard confirmations across thirteen visual
+checkpoints with clean stderr.
+
+Two older implementation-status statements later in this document need this
+clarification: RH850 is no longer a stub, and `src/feature_patch` is no longer
+"not started." Host-side allocation, manifests, insertion/splice logic, and
+the flash-plan bridge are implemented and synthetic-tested. What remains
+blocked is real-ECU validation of generated code, vector/free-space assumptions,
+inserted ROM images, and the delivery/recovery path. Those hardware gates still
+prohibit treating a preview or synthetic test as authorization to flash.
+
+Immediate application follow-ups are a checked-in patch-producing `.stmod`
+fixture, a non-zero hook/code/RAM visual preview, focused address-gate failure
+screenshots, an RH850 visual pass, actionable finding-to-node navigation, and
+graph undo/redo plus broader keyboard access.
+
 ## Stance on third-party prior art
 
 Several commercial and source-available tuning tools ship something in this category. The clean-room rule applies, restated:

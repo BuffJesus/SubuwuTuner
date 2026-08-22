@@ -1,0 +1,13 @@
+[[table]]
+id          = "primary_open_loop_fuel"
+name        = "Primary open-loop AFR target"
+category    = "fuel"
+dimensions  = 2
+address     = 0x0100
+data_type   = "uint8"
+scaling     = "afr_x01"
+axis_x      = "rpm_axis"
+axis_y      = "load_axis"
+notes       = "Target AFR for high-load open-loop operation."
+emissions_relevant      = false
+engine_safety_critical  = true

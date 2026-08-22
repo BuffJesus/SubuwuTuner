@@ -223,6 +223,9 @@ constexpr std::string_view kUsage =
     "                            Print metadata + current working-ROM CRC32 for\n"
     "                            a .stune project. --json emits a one-line\n"
     "                            subuwutuner.project-info.v1 object for CI scripts.\n"
+    "    project-restore-checkpoint <dir> --id <checkpoint> --yes\n"
+    "                            Restore a named checkpoint into working.bin as\n"
+    "                            one undoable byte transaction. --yes is required.\n"
     "    project-edit --table <id> [--rows A:B] [--cols A:B] OP [VALUE] <dir>\n"
     "                            Apply an edit to a project's working ROM and\n"
     "                            update project.toml. Same OPs as table-edit.\n"
@@ -262,7 +265,8 @@ constexpr std::string_view kUsage =
     "    project-validate <dir> [--json]\n"
     "                            Health check: project.toml loads, both ROMs read,\n"
     "                            pack has tables, source CRC matches recorded value,\n"
-    "                            [[rom]] entries resolve, audit.log integrity is OK.\n"
+    "                            [[rom]]/[[checkpoint]] entries resolve, checkpoint\n"
+    "                            metadata is current, and audit.log integrity is OK.\n"
     "                            Exits 1 on the first failure — gateable from CI.\n"
     "    project-set-active-rom <dir> <id>\n"
     "                            Designate which ROM read-side verbs target by default.\n"
@@ -1806,6 +1810,33 @@ int cmd_pack_info_json(std::filesystem::path const &path) {
     }
     out.append("]");
 
+    // Exact-CID calibration regions are intentionally separate from the
+    // legacy writable-region/codegen list. Surface their evidence state so
+    // pack review and CI can see which ranges are merely candidates and
+    // which have been approved for a specific ECU identity.
+    out.append(",\"calibration_regions\":[");
+    for (std::size_t i = 0; i < def->calibration_regions().size(); ++i) {
+        auto const &region = def->calibration_regions()[i];
+        if (i != 0)
+            out.append(",");
+        out.append("{\"name\":");
+        json_escape(out, region.name);
+        out.append(",\"cid\":");
+        json_escape(out, region.cid);
+        out.append(",\"address\":");
+        out.append(std::to_string(region.address));
+        out.append(",\"length\":");
+        out.append(std::to_string(region.length));
+        out.append(",\"status\":");
+        json_escape(out, region.status);
+        out.append(",\"provenance\":");
+        json_escape(out, region.provenance);
+        out.append(",\"description\":");
+        json_escape(out, region.description);
+        out.append("}");
+    }
+    out.append("]");
+
     // Counts.
     std::size_t emissions_tables = 0;
     std::size_t safety_tables = 0;
@@ -1847,6 +1878,8 @@ int cmd_pack_info_json(std::filesystem::path const &path) {
     out.append(std::to_string(def->primitives().size()));
     out.append(",\"workflows\":");
     out.append(std::to_string(def->workflows().size()));
+    out.append(",\"calibration_regions\":");
+    out.append(std::to_string(def->calibration_regions().size()));
     out.append("}");
 
     // Workflows — pack-declared [[workflow]] entries with their
@@ -1979,6 +2012,15 @@ int cmd_pack_info(int argc, char *argv[]) {
         } else {
             std::printf("  - %s  (CID '%s' @ 0x%08zX)\n", id.name.c_str(), id.cid_match.c_str(),
                         id.cid_address);
+        }
+    }
+    std::printf("Calibration regions: %zu\n", def->calibration_regions().size());
+    for (auto const &region : def->calibration_regions()) {
+        std::printf("  - %s  (CID '%s' @ 0x%08zX + 0x%zX, %s)\n",
+                    region.name.c_str(), region.cid.c_str(), region.address, region.length,
+                    region.status.c_str());
+        if (!region.provenance.empty()) {
+            std::printf("      provenance: %s\n", region.provenance.c_str());
         }
     }
     std::printf("Axes:            %zu\n", def->axes().size());
@@ -3523,6 +3565,38 @@ int cmd_project_info_json(std::filesystem::path const &dir) {
     out.append(",\"active_rom\":");
     json_escape(out, p->active_rom_id().empty() ? std::string{"working"} : p->active_rom_id());
 
+    out.append(",\"checkpoints\":[");
+    for (std::size_t i = 0; i < p->checkpoints().size(); ++i) {
+        if (i > 0) {
+            out.push_back(',');
+        }
+        auto const &checkpoint = p->checkpoints()[i];
+        out.append("{\"id\":");
+        json_escape(out, checkpoint.id);
+        out.append(",\"display_name\":");
+        json_escape(out, checkpoint.display_name);
+        out.append(",\"note\":");
+        json_escape(out, checkpoint.note);
+        out.append(",\"created\":");
+        json_escape(out, checkpoint.created);
+        out.append(",\"path\":");
+        json_escape(out, checkpoint.path_rel.generic_string());
+        out.append(",\"size\":");
+        out.append(std::to_string(checkpoint.byte_size));
+        out.append(",\"crc32\":");
+        out.append(std::to_string(checkpoint.crc32));
+        out.push_back('}');
+    }
+    out.append("]");
+    out.append(",\"checkpoint_warnings\":[");
+    for (std::size_t i = 0; i < p->checkpoint_warnings().size(); ++i) {
+        if (i > 0) {
+            out.push_back(',');
+        }
+        json_escape(out, p->checkpoint_warnings()[i]);
+    }
+    out.append("]");
+
     auto const &records = p->history().records();
     auto const cursor = p->history().cursor();
     out.append(",\"history\":{\"edit_count\":");
@@ -3661,6 +3735,16 @@ int cmd_project_info(int argc, char *argv[]) {
     }
     std::printf("Profile:    %s\n",
                 std::string{st::policy::profile_name(p->policy_profile())}.c_str());
+
+    std::printf("Checkpoints: %zu\n", p->checkpoints().size());
+    for (auto const &checkpoint : p->checkpoints()) {
+        std::printf("  %-20s %zu bytes, CRC32=0x%08X  %s\n", checkpoint.id.c_str(),
+                    checkpoint.byte_size, checkpoint.crc32,
+                    checkpoint.display_name.empty() ? "" : checkpoint.display_name.c_str());
+    }
+    for (auto const &warning : p->checkpoint_warnings()) {
+        std::printf("  ! checkpoint: %s\n", warning.c_str());
+    }
 
     {
         auto const &active = p->active_rom_id();
@@ -3809,6 +3893,69 @@ int cmd_project_info(int argc, char *argv[]) {
 // save_metadata. Analyst Issue #10 read-slice ergonomics — without
 // this the user has to hand-edit project.toml + drop the file in
 // themselves.
+int cmd_project_restore_checkpoint(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> proj_dir;
+    std::optional<std::string> checkpoint_id;
+    bool confirmed = false;
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "--id") {
+            if (i + 1 >= argc) {
+                std::fputs("project-restore-checkpoint: --id requires a value\n", stderr);
+                return 2;
+            }
+            checkpoint_id = std::string{argv[++i]};
+        } else if (a == "--yes") {
+            confirmed = true;
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "project-restore-checkpoint: unknown option: %s\n", argv[i]);
+            return 2;
+        } else if (!proj_dir.has_value()) {
+            proj_dir = std::filesystem::path{argv[i]};
+        } else {
+            std::fprintf(stderr, "project-restore-checkpoint: extra positional: %s\n", argv[i]);
+            return 2;
+        }
+    }
+    if (!proj_dir.has_value() || !checkpoint_id.has_value()) {
+        std::fputs("project-restore-checkpoint: missing project directory or --id\n"
+                   "Usage: subuwutuner-cli project-restore-checkpoint <dir> "
+                   "--id <checkpoint> --yes\n",
+                   stderr);
+        return 2;
+    }
+    if (!confirmed) {
+        std::fputs("project-restore-checkpoint: refusing without --yes confirmation.\n"
+                   "This replaces working.bin and records one undoable byte transaction.\n",
+                   stderr);
+        return 2;
+    }
+    auto project = st::Project::open(*proj_dir);
+    if (!project.has_value()) {
+        std::fprintf(stderr, "project-restore-checkpoint: %s\n",
+                     project.error().to_string().c_str());
+        return 1;
+    }
+    auto const status = project->restore_checkpoint(*checkpoint_id);
+    if (!status.has_value()) {
+        std::fprintf(stderr, "project-restore-checkpoint: %s\n",
+                     status.error().to_string().c_str());
+        return 1;
+    }
+    auto const *restored = [&]() -> st::Project::Checkpoint const * {
+        for (auto const &checkpoint : project->checkpoints()) {
+            if (checkpoint.id == *checkpoint_id) {
+                return &checkpoint;
+            }
+        }
+        return nullptr;
+    }();
+    std::printf("Restored checkpoint '%s' into working.bin (CRC32=0x%08X).\n",
+                checkpoint_id->c_str(), restored != nullptr ? restored->crc32
+                                                             : project->working_rom().crc32());
+    return 0;
+}
+
 int cmd_project_add_rom(int argc, char *argv[]) {
     std::optional<std::filesystem::path> proj_dir;
     std::optional<std::string> rom_id;
@@ -4078,11 +4225,11 @@ int cmd_table_grep(int argc, char *argv[]) {
     }
     std::string needle = *pattern;
     std::transform(needle.begin(), needle.end(), needle.begin(),
-                   [](unsigned char c) { return std::tolower(c); });
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     auto const has_substring = [&needle](std::string_view hay) {
         std::string lower{hay};
         std::transform(lower.begin(), lower.end(), lower.begin(),
-                       [](unsigned char c) { return std::tolower(c); });
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         return lower.find(needle) != std::string::npos;
     };
     std::vector<st::Table const *> matches;
@@ -4133,7 +4280,7 @@ int cmd_completion(int argc, char *argv[]) {
     static char const *const kSubcommands[] = {
         "rom-info", "rom-diff", "rom-pull", "rom-identify",
         "dump-table", "dump-axis", "table-edit", "table-list",
-        "project-new", "project-info", "project-edit", "project-edit-csv",
+        "project-new", "project-info", "project-restore-checkpoint", "project-edit", "project-edit-csv",
         "project-export-csv", "project-set-profile", "project-add-rom",
         "project-list-roms", "project-validate", "project-clone",
         "project-set-active-rom",
@@ -4318,6 +4465,9 @@ int cmd_project_clone(int argc, char *argv[]) {
     for (auto const &r : src_proj->additional_roms()) {
         to_copy.push_back(r.path_rel.string());
     }
+    for (auto const &checkpoint : src_proj->checkpoints()) {
+        to_copy.push_back(checkpoint.path_rel.string());
+    }
     // definitions/ sub-dir if the project references an in-tree pack.
     if (std::filesystem::is_directory(*src_dir / "definitions")) {
         // Whole-dir copy preserving structure.
@@ -4330,6 +4480,13 @@ int cmd_project_clone(int argc, char *argv[]) {
         }
     }
     for (auto const &rel : to_copy) {
+        auto const parent = (*dst_dir / std::filesystem::path{rel}).parent_path();
+        std::filesystem::create_directories(parent, ec);
+        if (ec) {
+            std::fprintf(stderr, "project-clone: mkdir for %s: %s\n", rel.c_str(),
+                         ec.message().c_str());
+            return 1;
+        }
         std::filesystem::copy_file(*src_dir / rel, *dst_dir / rel,
                                    std::filesystem::copy_options::none, ec);
         if (ec) {
@@ -4678,7 +4835,15 @@ int cmd_project_validate(int argc, char *argv[]) {
     check("[[rom]] entries resolve", extras_ok,
           extras_ok ? "" : std::to_string(warns.size()) +
                                 " warning(s) — first: " + warns.front());
-    // 6. edits.toml — optional, but if present it must load (we already
+    // 6. Named checkpoints must resolve and agree with their recorded
+    // metadata. A drifted checkpoint is not silently trusted as a recovery
+    // or review reference.
+    auto const &checkpoint_warns = proj.checkpoint_warnings();
+    bool const checkpoints_ok = checkpoint_warns.empty();
+    check("[[checkpoint]] entries resolve", checkpoints_ok,
+          checkpoints_ok ? "" : std::to_string(checkpoint_warns.size()) +
+                                     " warning(s) — first: " + checkpoint_warns.front());
+    // 7. edits.toml — optional, but if present it must load (we already
     //    proved that via Project::open above, since open() restores history
     //    or fails).
     auto const edits_path = *proj_dir / "edits.toml";
@@ -4686,7 +4851,7 @@ int cmd_project_validate(int argc, char *argv[]) {
         check("edits.toml loads", true,
               std::to_string(proj.history().records().size()) + " records");
     }
-    // 7. Audit log integrity — same checksum walk audit verify does.
+    // 8. Audit log integrity — same checksum walk audit verify does.
     auto const log_path = *proj_dir / "audit.log";
     if (std::filesystem::exists(log_path)) {
         auto entries = st::audit::read_all(log_path);
@@ -14458,6 +14623,8 @@ int cmd_list_validators(int argc, char *argv[]) {
             json_escape(out, v.default_thresholds);
             out.append(",\"skip_when\":");
             json_escape(out, v.skip_when);
+            out.append(",\"blocks_when\":");
+            json_escape(out, v.blocks_when);
             out.append("}");
         }
         out.append("]}\n");
@@ -14483,6 +14650,11 @@ int cmd_list_validators(int argc, char *argv[]) {
             std::printf("    No-op when: %.*s\n",
                         static_cast<int>(v.skip_when.size()),
                         v.skip_when.data());
+        }
+        if (!v.blocks_when.empty()) {
+            std::printf("    REFUSES when: %.*s\n",
+                        static_cast<int>(v.blocks_when.size()),
+                        v.blocks_when.data());
         }
         std::puts("");
     }
@@ -27152,10 +27324,6 @@ void render_inspect_text(std::string const &path,
     std::printf("\n");
 
     if (!summary.empty()) {
-        std::uint32_t total_patches = 0;
-        for (auto const &row : summary) {
-            total_patches += row.patch_count;
-        }
         std::printf("Architectural breakdown\n");
         for (auto const &row : summary) {
             auto const layer_text = st::devices::ets::layer_label(row.layer);
@@ -30103,6 +30271,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "project-info") {
         return cmd_project_info(argc - 2, argv + 2);
+    }
+    if (cmd == "project-restore-checkpoint") {
+        return cmd_project_restore_checkpoint(argc - 2, argv + 2);
     }
     if (cmd == "project-edit") {
         return cmd_project_edit(argc - 2, argv + 2);

@@ -197,4 +197,51 @@ to_string(ValidationError::Kind k) noexcept {
     return "(unknown)";
 }
 
+std::string_view
+to_string(ChecksumState s) noexcept {
+    switch (s) {
+        case ChecksumState::NotApplicable:
+            return "NotApplicable";
+        case ChecksumState::FlashReady:
+            return "FlashReady";
+        case ChecksumState::NeedsRepair:
+            return "NeedsRepair";
+    }
+    return "(unknown)";
+}
+
+std::uint16_t
+flash_checksum(std::span<std::uint8_t const> rom) noexcept {
+    return u16be_sum(rom, kSumRangeStart, kSumRangeEnd);
+}
+
+ChecksumState
+checksum_state(std::span<std::uint8_t const> rom) noexcept {
+    // The 2 MB contract is only meaningful on a full 2 MB SH-2A image.
+    if (rom.size() != kWritableEnd) {
+        return ChecksumState::NotApplicable;
+    }
+    return flash_checksum(rom) == kSumTarget ? ChecksumState::FlashReady
+                                             : ChecksumState::NeedsRepair;
+}
+
+st::Status
+repair_balance(std::span<std::uint8_t> rom) noexcept {
+    if (rom.size() != kWritableEnd) {
+        return failure(Error{ErrorCode::InvalidArgument,
+                             "repair_balance: image is not a 2 MB SH-2A ROM "
+                             "(size != 0x200000); the 0x5AA5 contract does not "
+                             "apply"});
+    }
+    // compute_balance sums the WHOLE window including the current balance
+    // bytes, so zero them first (mirrors build_image) — otherwise the
+    // result compensates against a stale balance and the sum drifts.
+    rom[kBalanceOffset]      = 0U;
+    rom[kBalanceOffset + 1U] = 0U;
+    auto const bal           = compute_balance(rom);
+    rom[kBalanceOffset]      = static_cast<std::uint8_t>((bal >> 8) & 0xFFU);
+    rom[kBalanceOffset + 1U] = static_cast<std::uint8_t>(bal & 0xFFU);
+    return {};
+}
+
 }  // namespace st::tune_export

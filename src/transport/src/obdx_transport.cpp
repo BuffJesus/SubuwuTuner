@@ -730,7 +730,7 @@ st::Status Transport::open(LinkConfig const &cfg) {
     }
     auto const state_byte = (*enable_rsp)[1];
     if (state_byte != kStateOn && state_byte != kStateListenOnly) {
-        char buf[160];
+        char buf[256];
         std::snprintf(buf, sizeof buf,
                       "obdx::Transport::open: EnableNetwork acknowledged but "
                       "state byte 0x%02X is not ON (0x01) — the adapter could "

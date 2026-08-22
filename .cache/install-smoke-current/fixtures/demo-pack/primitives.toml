@@ -1,0 +1,276 @@
+# Pack-declared primitive nodes per docs/16. Primitives are pure
+# computation — they connect between hook outputs and hook inputs to
+# transform values. Unlike hooks, primitives don't splice into
+# firmware; they have no ecu_address or free_ram region. The signal-
+# direction convention is the obvious one: `inputs` are graph Input
+# pins (consumed from upstream), `outputs` are graph Output pins.
+#
+# Type ergonomics still apply — wires refuse to cross non-empty unit
+# boundaries. The generic numeric primitives below deliberately
+# declare no unit so they pass through whatever upstream provides.
+
+# ---- Arithmetic ----------------------------------------------------
+
+[[primitive]]
+id           = "add_float"
+display_name = "Add"
+description  = "Floating-point sum of two inputs."
+inputs = [
+  { name = "a", type = "float" },
+  { name = "b", type = "float" },
+]
+outputs = [
+  { name = "out", type = "float" },
+]
+
+[[primitive]]
+id           = "multiply_float"
+display_name = "Multiply"
+description  = "Floating-point product of two inputs."
+inputs = [
+  { name = "a", type = "float" },
+  { name = "b", type = "float" },
+]
+outputs = [
+  { name = "out", type = "float" },
+]
+
+[[primitive]]
+id           = "divide_float"
+display_name = "Divide"
+description  = "Floating-point a / b. Codegen will inject a divide-by-zero guard."
+inputs = [
+  { name = "a", type = "float" },
+  { name = "b", type = "float" },
+]
+outputs = [
+  { name = "out", type = "float" },
+]
+
+# ---- Integer arithmetic --------------------------------------------
+#
+# Mirror of the float arithmetic primitives but typed Int throughout.
+# Wired up so the SH-2A backend (which currently implements Int + Bool
+# + control flow but not FPU) has matching primitives to demo against.
+
+[[primitive]]
+id           = "add_int"
+display_name = "Add (int)"
+description  = "Integer sum of two inputs."
+inputs = [
+  { name = "a", type = "int" },
+  { name = "b", type = "int" },
+]
+outputs = [
+  { name = "out", type = "int" },
+]
+
+[[primitive]]
+id           = "subtract_int"
+display_name = "Subtract (int)"
+description  = "Integer a - b."
+inputs = [
+  { name = "a", type = "int" },
+  { name = "b", type = "int" },
+]
+outputs = [
+  { name = "out", type = "int" },
+]
+
+[[primitive]]
+id           = "multiply_int"
+display_name = "Multiply (int)"
+description  = "Integer product of two inputs."
+inputs = [
+  { name = "a", type = "int" },
+  { name = "b", type = "int" },
+]
+outputs = [
+  { name = "out", type = "int" },
+]
+
+[[primitive]]
+id           = "divide_int"
+display_name = "Divide (int)"
+description  = "Integer a / b via the SH-2A FPU bridge (FLOAT → FDIV → FTRC). Truncates toward zero (matches C int division). Operands above ±2^24 lose precision; divide-by-zero raises a FPU exception — gate with compare → select if needed."
+inputs = [
+  { name = "a", type = "int" },
+  { name = "b", type = "int" },
+]
+outputs = [
+  { name = "out", type = "int" },
+]
+
+# ---- Comparison + boolean logic ------------------------------------
+
+[[primitive]]
+id           = "subtract_float"
+display_name = "Subtract"
+description  = "Floating-point a - b."
+inputs = [
+  { name = "a", type = "float" },
+  { name = "b", type = "float" },
+]
+outputs = [
+  { name = "out", type = "float" },
+]
+
+[[primitive]]
+id           = "compare_gt_float"
+display_name = "Greater than (float)"
+description  = "True when a > b (float compare via FCMP/GT)."
+inputs = [
+  { name = "a", type = "float" },
+  { name = "b", type = "float" },
+]
+outputs = [
+  { name = "out", label = "a > b", type = "bool" },
+]
+
+[[primitive]]
+id           = "compare_lt_float"
+display_name = "Less than (float)"
+description  = "True when a < b (float compare via FCMP/GT, operand-swapped)."
+inputs = [
+  { name = "a", type = "float" },
+  { name = "b", type = "float" },
+]
+outputs = [
+  { name = "out", label = "a < b", type = "bool" },
+]
+
+[[primitive]]
+id           = "compare_eq_float"
+display_name = "Equal (float)"
+description  = "True when a == b (float compare via FCMP/EQ; IEEE 754 ordered — NaN compares unequal)."
+inputs = [
+  { name = "a", type = "float" },
+  { name = "b", type = "float" },
+]
+outputs = [
+  { name = "out", label = "a == b", type = "bool" },
+]
+
+[[primitive]]
+id           = "compare_lt_int"
+display_name = "Less than (int)"
+description  = "True when a < b (integer compare)."
+inputs = [
+  { name = "a", type = "int" },
+  { name = "b", type = "int" },
+]
+outputs = [
+  { name = "out", label = "a < b", type = "bool" },
+]
+
+[[primitive]]
+id           = "compare_gt_int"
+display_name = "Greater than (int)"
+description  = "True when a > b (integer compare)."
+inputs = [
+  { name = "a", type = "int" },
+  { name = "b", type = "int" },
+]
+outputs = [
+  { name = "out", label = "a > b", type = "bool" },
+]
+
+[[primitive]]
+id           = "compare_eq_int"
+display_name = "Equal (int)"
+description  = "True when a == b (integer compare)."
+inputs = [
+  { name = "a", type = "int" },
+  { name = "b", type = "int" },
+]
+outputs = [
+  { name = "out", label = "a == b", type = "bool" },
+]
+
+[[primitive]]
+id           = "select_float"
+display_name = "Select (ternary)"
+description  = "Returns `t` when cond is true, otherwise `f`. The codegen-equivalent of a conditional expression."
+inputs = [
+  { name = "cond", type = "bool" },
+  { name = "t",    type = "float" },
+  { name = "f",    type = "float" },
+]
+outputs = [
+  { name = "out", type = "float" },
+]
+
+[[primitive]]
+id           = "select_int"
+display_name = "Select (ternary, int)"
+description  = "Returns `t` when cond is true, otherwise `f` — int operands, supported by the SH-2A backend today."
+inputs = [
+  { name = "cond", type = "bool" },
+  { name = "t",    type = "int" },
+  { name = "f",    type = "int" },
+]
+outputs = [
+  { name = "out", type = "int" },
+]
+
+[[primitive]]
+id           = "select_bool"
+display_name = "Select (ternary, bool)"
+description  = "Returns `t` when cond is true, otherwise `f` — bool operands. Useful for short-circuit-style logic where the selected branch is itself a boolean."
+inputs = [
+  { name = "cond", type = "bool" },
+  { name = "t",    type = "bool" },
+  { name = "f",    type = "bool" },
+]
+outputs = [
+  { name = "out", type = "bool" },
+]
+
+[[primitive]]
+id           = "and_bool"
+display_name = "AND"
+description  = "Logical AND of two booleans."
+inputs = [
+  { name = "a", type = "bool" },
+  { name = "b", type = "bool" },
+]
+outputs = [
+  { name = "out", type = "bool" },
+]
+
+[[primitive]]
+id           = "or_bool"
+display_name = "OR"
+description  = "Logical OR of two booleans."
+inputs = [
+  { name = "a", type = "bool" },
+  { name = "b", type = "bool" },
+]
+outputs = [
+  { name = "out", type = "bool" },
+]
+
+[[primitive]]
+id           = "not_bool"
+display_name = "NOT"
+description  = "Logical NOT — inverts a boolean input."
+inputs = [
+  { name = "in", type = "bool" },
+]
+outputs = [
+  { name = "out", type = "bool" },
+]
+
+# ---- Domain helpers (encapsulate hardcoded curves so sample graphs
+# don't need a constants feature to be readable) --------------------
+
+[[primitive]]
+id           = "flex_fuel_scale"
+display_name = "Flex-fuel scale curve"
+description  = "Map ethanol-content percentage to a fuel-multiplier curve. E0 = 1.00, E85 = 1.28 (approx), interpolated linearly. A future revision will replace this with a table-lookup primitive once the table-binding feature lands."
+inputs = [
+  { name = "ethanol_pct", label = "Ethanol %", type = "float", unit = "%" },
+]
+outputs = [
+  { name = "scale", label = "Fuel scale", type = "float" },
+]

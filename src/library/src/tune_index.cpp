@@ -36,6 +36,26 @@ std::string read_text(std::filesystem::path const &path) {
     return buf;
 }
 
+std::optional<std::string> environment_value(char const *name) {
+#ifdef _WIN32
+    char *value = nullptr;
+    std::size_t value_size = 0;
+    if (_dupenv_s(&value, &value_size, name) != 0 || value == nullptr || *value == '\0') {
+        std::free(value);
+        return std::nullopt;
+    }
+    std::string result{value};
+    std::free(value);
+    return result;
+#else
+    char const *value = std::getenv(name);
+    if (value == nullptr || *value == '\0') {
+        return std::nullopt;
+    }
+    return std::string{value};
+#endif
+}
+
 std::string lower_ascii(std::string_view s) {
     std::string out;
     out.reserve(s.size());
@@ -216,9 +236,8 @@ std::optional<std::filesystem::path> default_index_path() {
     std::error_code ec;
     // 1. Env override first — explicit absolute-path-to-index. Lets a
     // user with a non-standard layout point us at any index file.
-    if (char const *raw = std::getenv("ST_LIBRARY_INDEX");
-        raw != nullptr && raw[0] != '\0') {
-        std::filesystem::path candidate{raw};
+    if (auto const raw = environment_value("ST_LIBRARY_INDEX")) {
+        std::filesystem::path candidate{*raw};
         if (std::filesystem::is_regular_file(candidate, ec) && !ec) {
             return candidate;
         }

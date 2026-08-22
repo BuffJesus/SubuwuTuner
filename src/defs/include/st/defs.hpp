@@ -338,6 +338,22 @@ struct WritableRegion {
     std::string description; // optional; "" if not set
 };
 
+// A calibration-only flash range for the normal tuning write path. This is
+// intentionally separate from WritableRegion: [[writable_region]] is the
+// codegen/patch-insertion allow-list and must not silently become permission
+// to write ordinary calibration bytes. A calibration region is tied to an
+// exact CID and carries a provenance/status record so a live preflight can
+// select only an explicitly approved match.
+struct CalibrationRegion {
+    std::string name;
+    std::string cid;          // exact calibration ID covered by this range
+    std::string provenance;   // e.g. vendor, analyst-byte-verified, user-attested
+    std::string status;       // "candidate" or "approved"
+    std::size_t address{0};
+    std::size_t length{0};
+    std::string description;
+};
+
 // A reusable computation node declared by the pack — arithmetic,
 // boolean logic, table lookup, etc. Distinct from Hook in that
 // primitives don't splice into the firmware; they're pure functions
@@ -422,6 +438,14 @@ public:
     [[nodiscard]] std::vector<WritableRegion> const &writable_regions() const noexcept {
         return writable_regions_;
     }
+    [[nodiscard]] std::vector<CalibrationRegion> const &calibration_regions() const noexcept {
+        return calibration_regions_;
+    }
+    // Return only regions explicitly marked approved for the exact CID.
+    // Candidate regions are intentionally excluded: this is the bridge from
+    // definition evidence to the flash preflight allow-list.
+    [[nodiscard]] std::vector<CalibrationRegion const *>
+    approved_calibration_regions(std::string_view cid) const;
     [[nodiscard]] std::vector<Workflow> const &workflows() const noexcept {
         return workflows_;
     }
@@ -469,6 +493,7 @@ public:
     // from the matching identification.
     struct MatchInfo {
         std::string name;
+        std::string cid;
         std::size_t offset{};
         bool scanned{false};
     };
@@ -539,6 +564,7 @@ private:
     std::vector<Hook> hooks_;
     std::vector<Primitive> primitives_;
     std::vector<WritableRegion> writable_regions_;
+    std::vector<CalibrationRegion> calibration_regions_;
     std::vector<Workflow> workflows_;
 
     friend class DefinitionBuilder;

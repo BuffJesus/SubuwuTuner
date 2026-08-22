@@ -1,0 +1,106 @@
+﻿{
+    "executable":  "D:\\Subuwu\\code\\build\\win-clang-coherent\\bin\\subuwutuner-gui.exe",
+    "scenario":  "Designer",
+    "project":  "D:\\Subuwu\\code\\fixtures\\demo.stune",
+    "requested_window":  "1400x880",
+    "pid":  22716,
+    "title":  "Demo (synthetic) — SubuwuTuner",
+    "responding":  true,
+    "stderr_empty":  true,
+    "stdout_bytes":  0,
+    "stderr_bytes":  0,
+    "termination":  "stopped-by-harness",
+    "exit_code":  null,
+    "screenshots":  [
+                        {
+                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke-designer-final\\01-designer-empty.png",
+                            "width":  1400,
+                            "height":  880,
+                            "bytes":  89951,
+                            "sampled_colors":  11,
+                            "non_black_ratio":  1,
+                            "sanity_passed":  true
+                        },
+                        {
+                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke-designer-final\\02-insert-palette.png",
+                            "width":  1400,
+                            "height":  880,
+                            "bytes":  136822,
+                            "sampled_colors":  12,
+                            "non_black_ratio":  1,
+                            "sanity_passed":  true
+                        },
+                        {
+                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke-designer-final\\03-hook-node.png",
+                            "width":  1400,
+                            "height":  880,
+                            "bytes":  92541,
+                            "sampled_colors":  13,
+                            "non_black_ratio":  1,
+                            "sanity_passed":  true
+                        },
+                        {
+                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke-designer-final\\04-hook-and-primitive.png",
+                            "width":  1400,
+                            "height":  880,
+                            "bytes":  93332,
+                            "sampled_colors":  11,
+                            "non_black_ratio":  1,
+                            "sanity_passed":  true
+                        },
+                        {
+                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke-designer-final\\05-wired-nodes.png",
+                            "width":  1400,
+                            "height":  880,
+                            "bytes":  94927,
+                            "sampled_colors":  11,
+                            "non_black_ratio":  1,
+                            "sanity_passed":  true
+                        },
+                        {
+                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke-designer-final\\06-pin-default-popup.png",
+                            "width":  1400,
+                            "height":  880,
+                            "bytes":  98135,
+                            "sampled_colors":  10,
+                            "non_black_ratio":  1,
+                            "sanity_passed":  true
+                        },
+                        {
+                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke-designer-final\\07-default-committed.png",
+                            "width":  1400,
+                            "height":  880,
+                            "bytes":  94390,
+                            "sampled_colors":  11,
+                            "non_black_ratio":  1,
+                            "sanity_passed":  true
+                        },
+                        {
+                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke-designer-final\\08-node-context-menu.png",
+                            "width":  1400,
+                            "height":  880,
+                            "bytes":  95862,
+                            "sampled_colors":  10,
+                            "non_black_ratio":  1,
+                            "sanity_passed":  true
+                        },
+                        {
+                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke-designer-final\\09-edge-context-menu.png",
+                            "width":  1400,
+                            "height":  880,
+                            "bytes":  97157,
+                            "sampled_colors":  10,
+                            "non_black_ratio":  1,
+                            "sanity_passed":  true
+                        },
+                        {
+                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke-designer-final\\10-validation-popup.png",
+                            "width":  1400,
+                            "height":  880,
+                            "bytes":  94390,
+                            "sampled_colors":  11,
+                            "non_black_ratio":  1,
+                            "sanity_passed":  true
+                        }
+                    ]
+}

@@ -63,6 +63,13 @@ std::vector<ShortcutGroup> const &shortcuts_reference() {
              {"Ctrl+V", "Paste tab-separated values at "
                         "cursor"},
          }},
+        {"Log Explorer",
+         {
+             {"Page Up / Page Down", "Move the map-trace sample by ten rows"},
+             {"Ctrl+Home / Ctrl+End", "Set the selected range start / exclusive end"},
+             {"Ctrl+M", "Add an event marker at the current trace sample"},
+             {"Ctrl+G", "Select the nearest RPM/load cell in the active map"},
+         }},
         {"Modals",
          {
              {"Enter", "Primary action (Save / Apply / "

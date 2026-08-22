@@ -1,0 +1,68 @@
+[profile]
+schema_version = 1
+id = "2017-wrx-keyed"
+platform = "subaru.wrx"
+years = [2017]
+start_system = "keyed"
+registration_class = "type_b"
+source = "2017 Subaru WRX/STI Service Manual"
+
+[[module]]
+id = "ecm"
+required_to_start = true
+identity_bearing = true
+replacement_requires_registration = true
+[[module]]
+id = "body_integrated_unit"
+required_to_start = true
+identity_bearing = true
+replacement_requires_registration = true
+[[module]]
+id = "immobilizer_control_module"
+required_to_start = true
+identity_bearing = true
+replacement_requires_registration = true
+[[module]]
+id = "combination_meter"
+required_to_start = false
+identity_bearing = false
+replacement_requires_registration = false
+
+[[link]]
+from = "body_integrated_unit"
+to = "ecm"
+transport = "dedicated_immobilizer_circuit"
+endpoint = "ECM E158-43"
+purpose = "start_authorization"
+
+[[effect]]
+id = "immobilizer_fuel_cut"
+commanded_by = "immobilizer_system"
+observed_by = "ecm"
+inhibits = ["fuel_injection"]
+observable = "ECM current-data item: Immobilizer Fuel Cut Status"
+
+[[dtc]]
+code = "B1570"
+meaning = "antenna"
+[[dtc]]
+code = "B1571"
+meaning = "reference code incompatibility between body integrated unit and ECM"
+[[dtc]]
+code = "B1572"
+meaning = "communication failure between body integrated unit and ECM"
+[[dtc]]
+code = "B1574"
+meaning = "key communication"
+[[dtc]]
+code = "B1575"
+meaning = "incorrect immobilizer key"
+[[dtc]]
+code = "B1576"
+meaning = "ECM EEPROM"
+[[dtc]]
+code = "B1577"
+meaning = "immobilizer control module EEPROM"
+[[dtc]]
+code = "B1578"
+meaning = "combination meter"

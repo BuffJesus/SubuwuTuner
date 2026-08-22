@@ -1,0 +1,3186 @@
+{
+  "schema": "subuwutuner.rom-pointer-aliases.v1",
+  "targets": {
+    "0xFFF890D7": {
+      "literal_count": 28,
+      "aliases": [
+        {
+          "literal_address": "0x7CC34",
+          "references": [
+            {
+              "alias": "PTR_DAT_0007cc34",
+              "function": "sensor_proc_task_scaled",
+              "address": "0x7C8BC",
+              "file": "decomp_LF9G003T_040000.txt",
+              "reference_count": 2,
+              "lines": [
+                3748,
+                3749
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x7EA90",
+          "references": [
+            {
+              "alias": "PTR_DAT_0007ea90",
+              "function": "FUN_0007e902",
+              "address": "0x7E902",
+              "file": "decomp_LF9G003T_040000.txt",
+              "reference_count": 1,
+              "lines": [
+                5307
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x7EDE8",
+          "references": [
+            {
+              "alias": "PTR_DAT_0007ede8",
+              "function": "FUN_0007ebe4",
+              "address": "0x7EBE4",
+              "file": "decomp_LF9G003T_040000.txt",
+              "reference_count": 1,
+              "lines": [
+                5568
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x7F06C",
+          "references": [
+            {
+              "alias": "PTR_DAT_0007f06c",
+              "function": "FUN_0007ebe4",
+              "address": "0x7EBE4",
+              "file": "decomp_LF9G003T_040000.txt",
+              "reference_count": 2,
+              "lines": [
+                5566,
+                5575
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x905BC",
+          "references": [
+            {
+              "alias": "PTR_DAT_000905bc",
+              "function": "FUN_00090450",
+              "address": "0x90450",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 2,
+              "lines": [
+                10783,
+                10785
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x90ED8",
+          "references": [
+            {
+              "alias": "PTR_DAT_00090ed8",
+              "function": "FUN_00090db8",
+              "address": "0x90DB8",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                11296
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x92A8C",
+          "references": [
+            {
+              "alias": "PTR_DAT_00092a8c",
+              "function": "FUN_000928fc",
+              "address": "0x928FC",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                12079
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x933B0",
+          "references": [
+            {
+              "alias": "PTR_DAT_000933b0",
+              "function": "FUN_000932c0",
+              "address": "0x932C0",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                12690
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x93624",
+          "references": [
+            {
+              "alias": "PTR_DAT_00093624",
+              "function": "FUN_00093428",
+              "address": "0x93428",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                12765
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x95168",
+          "references": [
+            {
+              "alias": "PTR_DAT_00095168",
+              "function": "FUN_00094f60",
+              "address": "0x94F60",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                13882
+              ]
+            },
+            {
+              "alias": "PTR_DAT_00095168",
+              "function": "FUN_0009502e",
+              "address": "0x9502E",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                13925
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x95600",
+          "references": [
+            {
+              "alias": "PTR_DAT_00095600",
+              "function": "FUN_00095518",
+              "address": "0x95518",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                14207
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x95DC0",
+          "references": [
+            {
+              "alias": "PTR_DAT_00095dc0",
+              "function": "FUN_00095c02",
+              "address": "0x95C02",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                14658
+              ]
+            },
+            {
+              "alias": "PTR_DAT_00095dc0",
+              "function": "FUN_00095c96",
+              "address": "0x95C96",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                14708
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x96FC0",
+          "references": [
+            {
+              "alias": "PTR_DAT_00096fc0",
+              "function": "FUN_00096e22",
+              "address": "0x96E22",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                15399
+              ]
+            },
+            {
+              "alias": "PTR_DAT_00096fc0",
+              "function": "FUN_00096e4a",
+              "address": "0x96E4A",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                15415
+              ]
+            },
+            {
+              "alias": "PTR_DAT_00096fc0",
+              "function": "FUN_00096ece",
+              "address": "0x96ECE",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 2,
+              "lines": [
+                15461,
+                15464
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xA12D8",
+          "references": [
+            {
+              "alias": "PTR_DAT_000a12d8",
+              "function": "FUN_000a108a",
+              "address": "0xA108A",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 2,
+              "lines": [
+                18435,
+                18440
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000a12d8",
+              "function": "FUN_000a1146",
+              "address": "0xA1146",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                18463
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000a12d8",
+              "function": "FUN_000a1194",
+              "address": "0xA1194",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                18500
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xAA95C",
+          "references": [
+            {
+              "alias": "PTR_DAT_000aa95c",
+              "function": "FUN_000aa718",
+              "address": "0xAA718",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                25704
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xAAC88",
+          "references": [
+            {
+              "alias": "PTR_DAT_000aac88",
+              "function": "FUN_000aa9fe",
+              "address": "0xAA9FE",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                25807
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xAAFE0",
+          "references": [
+            {
+              "alias": "PTR_DAT_000aafe0",
+              "function": "FUN_000aae50",
+              "address": "0xAAE50",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                26042
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xAB300",
+          "references": [
+            {
+              "alias": "PTR_DAT_000ab300",
+              "function": "FUN_000ab0bc",
+              "address": "0xAB0BC",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                26121
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xB5118",
+          "references": [
+            {
+              "alias": "PTR_DAT_000b5118",
+              "function": "FUN_000b5052",
+              "address": "0xB5052",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 2,
+              "lines": [
+                33558,
+                33560
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000b5118",
+              "function": "FUN_000b5088",
+              "address": "0xB5088",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33586
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xB5394",
+          "references": [
+            {
+              "alias": "PTR_DAT_000b5394",
+              "function": "FUN_000b51c6",
+              "address": "0xB51C6",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 2,
+              "lines": [
+                33668,
+                33673
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000b5394",
+              "function": "FUN_000b5294",
+              "address": "0xB5294",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33697
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000b5394",
+              "function": "FUN_000b52d0",
+              "address": "0xB52D0",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33717
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000b5394",
+              "function": "FUN_000b5310",
+              "address": "0xB5310",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33732
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xB55E0",
+          "references": [
+            {
+              "alias": "PTR_DAT_000b55e0",
+              "function": "FUN_000b53c0",
+              "address": "0xB53C0",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33755
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000b55e0",
+              "function": "FUN_000b558c",
+              "address": "0xB558C",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33875
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xB58A0",
+          "references": [
+            {
+              "alias": "PTR_DAT_000b58a0",
+              "function": "FUN_000b5712",
+              "address": "0xB5712",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 2,
+              "lines": [
+                33971,
+                33972
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x1121D0",
+          "references": [
+            {
+              "alias": "PTR_DAT_001121d0",
+              "function": "FUN_00110498",
+              "address": "0x110498",
+              "file": "decomp_LF9G003T_100000.txt",
+              "reference_count": 2,
+              "lines": [
+                15347,
+                15358
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x148A78",
+          "references": []
+        },
+        {
+          "literal_address": "0x17B320",
+          "references": []
+        },
+        {
+          "literal_address": "0x189720",
+          "references": []
+        },
+        {
+          "literal_address": "0x189A94",
+          "references": []
+        },
+        {
+          "literal_address": "0x1C7E94",
+          "references": [
+            {
+              "alias": "PTR_DAT_001c7e94",
+              "function": "FUN_001c7c30",
+              "address": "0x1C7C30",
+              "file": "decomp_LF9G003T_1C0000.txt",
+              "reference_count": 2,
+              "lines": [
+                10074,
+                10085
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "0xFFF890D8": {
+      "literal_count": 62,
+      "aliases": [
+        {
+          "literal_address": "0x7CBD8",
+          "references": [
+            {
+              "alias": "PTR_DAT_0007cbd8",
+              "function": "sensor_proc_task_scaled",
+              "address": "0x7C8BC",
+              "file": "decomp_LF9G003T_040000.txt",
+              "reference_count": 2,
+              "lines": [
+                3708,
+                3709
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x7FBE4",
+          "references": []
+        },
+        {
+          "literal_address": "0x80970",
+          "references": []
+        },
+        {
+          "literal_address": "0x80B94",
+          "references": []
+        },
+        {
+          "literal_address": "0x84890",
+          "references": [
+            {
+              "alias": "PTR_DAT_00084890",
+              "function": "FUN_000846da",
+              "address": "0x846DA",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                2792
+              ]
+            },
+            {
+              "alias": "PTR_DAT_00084890",
+              "function": "FUN_00084716",
+              "address": "0x84716",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                2811
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x86A54",
+          "references": [
+            {
+              "alias": "PTR_DAT_00086a54",
+              "function": "FUN_00086858",
+              "address": "0x86858",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 2,
+              "lines": [
+                4367,
+                4368
+              ]
+            },
+            {
+              "alias": "PTR_DAT_00086a54",
+              "function": "FUN_0008698c",
+              "address": "0x8698C",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 2,
+              "lines": [
+                4456,
+                4457
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x88380",
+          "references": [
+            {
+              "alias": "PTR_DAT_00088380",
+              "function": "FUN_00088284",
+              "address": "0x88284",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                5601
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x888C8",
+          "references": [
+            {
+              "alias": "PTR_DAT_000888c8",
+              "function": "FUN_00088684",
+              "address": "0x88684",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                5748
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x898AC",
+          "references": [
+            {
+              "alias": "PTR_DAT_000898ac",
+              "function": "FUN_0008974e",
+              "address": "0x8974E",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                6405
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x905C8",
+          "references": [
+            {
+              "alias": "PTR_DAT_000905c8",
+              "function": "FUN_00090450",
+              "address": "0x90450",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 3,
+              "lines": [
+                10786,
+                10788,
+                10794
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x90900",
+          "references": [
+            {
+              "alias": "PTR_DAT_00090900",
+              "function": "FUN_0009074a",
+              "address": "0x9074A",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 4,
+              "lines": [
+                10892,
+                10894,
+                10897,
+                10901
+              ]
+            },
+            {
+              "alias": "PTR_DAT_00090900",
+              "function": "FUN_0009078e",
+              "address": "0x9078E",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 4,
+              "lines": [
+                10919,
+                10921,
+                10924,
+                10928
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x90B10",
+          "references": [
+            {
+              "alias": "PTR_DAT_00090b10",
+              "function": "FUN_00090920",
+              "address": "0x90920",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 2,
+              "lines": [
+                10980,
+                10984
+              ]
+            },
+            {
+              "alias": "PTR_DAT_00090b10",
+              "function": "FUN_0009095a",
+              "address": "0x9095A",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 2,
+              "lines": [
+                11004,
+                11008
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x910F8",
+          "references": [
+            {
+              "alias": "PTR_DAT_000910f8",
+              "function": "FUN_00090f34",
+              "address": "0x90F34",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 2,
+              "lines": [
+                11365,
+                11375
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x917B0",
+          "references": [
+            {
+              "alias": "PTR_DAT_000917b0",
+              "function": "FUN_0009166c",
+              "address": "0x9166C",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 2,
+              "lines": [
+                11746,
+                11750
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x91FA4",
+          "references": []
+        },
+        {
+          "literal_address": "0x93604",
+          "references": [
+            {
+              "alias": "PTR_DAT_00093604",
+              "function": "FUN_000933d6",
+              "address": "0x933D6",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                12735
+              ]
+            },
+            {
+              "alias": "PTR_DAT_00093604",
+              "function": "FUN_00093428",
+              "address": "0x93428",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                12765
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x94A84",
+          "references": [
+            {
+              "alias": "PTR_DAT_00094a84",
+              "function": "FUN_0009379a",
+              "address": "0x9379A",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                13668
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x9516C",
+          "references": [
+            {
+              "alias": "PTR_DAT_0009516c",
+              "function": "FUN_00094f60",
+              "address": "0x94F60",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                13882
+              ]
+            },
+            {
+              "alias": "PTR_DAT_0009516c",
+              "function": "FUN_0009502e",
+              "address": "0x9502E",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                13925
+              ]
+            },
+            {
+              "alias": "PTR_DAT_0009516c",
+              "function": "FUN_000950d6",
+              "address": "0x950D6",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                13952
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x95604",
+          "references": [
+            {
+              "alias": "PTR_DAT_00095604",
+              "function": "FUN_00095518",
+              "address": "0x95518",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                14207
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x95DC4",
+          "references": [
+            {
+              "alias": "PTR_DAT_00095dc4",
+              "function": "FUN_00095c02",
+              "address": "0x95C02",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                14658
+              ]
+            },
+            {
+              "alias": "PTR_DAT_00095dc4",
+              "function": "FUN_00095c96",
+              "address": "0x95C96",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                14708
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xAA690",
+          "references": [
+            {
+              "alias": "PTR_DAT_000aa690",
+              "function": "FUN_000aa52e",
+              "address": "0xAA52E",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                25527
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xB01D0",
+          "references": [
+            {
+              "alias": "PTR_DAT_000b01d0",
+              "function": "FUN_000b0142",
+              "address": "0xB0142",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                30349
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xB2404",
+          "references": [
+            {
+              "alias": "PTR_DAT_000b2404",
+              "function": "FUN_000b2372",
+              "address": "0xB2372",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                31634
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xB40BC",
+          "references": [
+            {
+              "alias": "PTR_DAT_000b40bc",
+              "function": "FUN_000b3df0",
+              "address": "0xB3DF0",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                32746
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xB4EB0",
+          "references": []
+        },
+        {
+          "literal_address": "0xB50F8",
+          "references": [
+            {
+              "alias": "PTR_DAT_000b50f8",
+              "function": "FUN_000b4ffe",
+              "address": "0xB4FFE",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33537
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000b50f8",
+              "function": "FUN_000b5052",
+              "address": "0xB5052",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33559
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xB5390",
+          "references": [
+            {
+              "alias": "PTR_DAT_000b5390",
+              "function": "FUN_000b51c6",
+              "address": "0xB51C6",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33667
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000b5390",
+              "function": "FUN_000b5294",
+              "address": "0xB5294",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33695
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xB5614",
+          "references": [
+            {
+              "alias": "PTR_DAT_000b5614",
+              "function": "FUN_000b543c",
+              "address": "0xB543C",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33800
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000b5614",
+              "function": "FUN_000b550e",
+              "address": "0xB550E",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33850
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000b5614",
+              "function": "FUN_000b558c",
+              "address": "0xB558C",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33872
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xB69A4",
+          "references": []
+        },
+        {
+          "literal_address": "0xB6B84",
+          "references": [
+            {
+              "alias": "PTR_DAT_000b6b84",
+              "function": "FUN_000b69c4",
+              "address": "0xB69C4",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                34994
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xB7528",
+          "references": [
+            {
+              "alias": "PTR_DAT_000b7528",
+              "function": "FUN_000b73be",
+              "address": "0xB73BE",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 2,
+              "lines": [
+                35475,
+                35480
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xB87F4",
+          "references": [
+            {
+              "alias": "PTR_DAT_000b87f4",
+              "function": "FUN_000b8656",
+              "address": "0xB8656",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                36720
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xB9C00",
+          "references": [
+            {
+              "alias": "PTR_DAT_000b9c00",
+              "function": "FUN_000b99d4",
+              "address": "0xB99D4",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                37805
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xB9F3C",
+          "references": [
+            {
+              "alias": "PTR_DAT_000b9f3c",
+              "function": "FUN_000b9cce",
+              "address": "0xB9CCE",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                37923
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xBC858",
+          "references": [
+            {
+              "alias": "PTR_DAT_000bc858",
+              "function": "FUN_000bc782",
+              "address": "0xBC782",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                40059
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xC3428",
+          "references": [
+            {
+              "alias": "PTR_DAT_000c3428",
+              "function": "FUN_000c3344",
+              "address": "0xC3344",
+              "file": "decomp_LF9G003T_0C0000.txt",
+              "reference_count": 1,
+              "lines": [
+                1831
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xC36AC",
+          "references": [
+            {
+              "alias": "PTR_DAT_000c36ac",
+              "function": "FUN_000c3564",
+              "address": "0xC3564",
+              "file": "decomp_LF9G003T_0C0000.txt",
+              "reference_count": 1,
+              "lines": [
+                1936
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000c36ac",
+              "function": "FUN_000c35c0",
+              "address": "0xC35C0",
+              "file": "decomp_LF9G003T_0C0000.txt",
+              "reference_count": 1,
+              "lines": [
+                1962
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000c36ac",
+              "function": "FUN_000c361a",
+              "address": "0xC361A",
+              "file": "decomp_LF9G003T_0C0000.txt",
+              "reference_count": 1,
+              "lines": [
+                1990
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xC3940",
+          "references": [
+            {
+              "alias": "PTR_DAT_000c3940",
+              "function": "FUN_000c3824",
+              "address": "0xC3824",
+              "file": "decomp_LF9G003T_0C0000.txt",
+              "reference_count": 2,
+              "lines": [
+                2123,
+                2136
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xC3BF8",
+          "references": [
+            {
+              "alias": "PTR_DAT_000c3bf8",
+              "function": "FUN_000c3a02",
+              "address": "0xC3A02",
+              "file": "decomp_LF9G003T_0C0000.txt",
+              "reference_count": 2,
+              "lines": [
+                2226,
+                2229
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xC3E20",
+          "references": [
+            {
+              "alias": "PTR_DAT_000c3e20",
+              "function": "FUN_000c3bfc",
+              "address": "0xC3BFC",
+              "file": "decomp_LF9G003T_0C0000.txt",
+              "reference_count": 2,
+              "lines": [
+                2275,
+                2279
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000c3e20",
+              "function": "FUN_000c3cc6",
+              "address": "0xC3CC6",
+              "file": "decomp_LF9G003T_0C0000.txt",
+              "reference_count": 2,
+              "lines": [
+                2330,
+                2337
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xC413C",
+          "references": [
+            {
+              "alias": "PTR_DAT_000c413c",
+              "function": "FUN_000c3ef8",
+              "address": "0xC3EF8",
+              "file": "decomp_LF9G003T_0C0000.txt",
+              "reference_count": 4,
+              "lines": [
+                2498,
+                2576,
+                2578,
+                2580
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xC4594",
+          "references": [
+            {
+              "alias": "PTR_DAT_000c4594",
+              "function": "FUN_000c4422",
+              "address": "0xC4422",
+              "file": "decomp_LF9G003T_0C0000.txt",
+              "reference_count": 2,
+              "lines": [
+                2707,
+                2710
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000c4594",
+              "function": "FUN_000c447a",
+              "address": "0xC447A",
+              "file": "decomp_LF9G003T_0C0000.txt",
+              "reference_count": 2,
+              "lines": [
+                2749,
+                2752
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000c4594",
+              "function": "FUN_000c44c6",
+              "address": "0xC44C6",
+              "file": "decomp_LF9G003T_0C0000.txt",
+              "reference_count": 2,
+              "lines": [
+                2769,
+                2772
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000c4594",
+              "function": "FUN_000c453c",
+              "address": "0xC453C",
+              "file": "decomp_LF9G003T_0C0000.txt",
+              "reference_count": 1,
+              "lines": [
+                2805
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xCC1AC",
+          "references": [
+            {
+              "alias": "PTR_DAT_000cc1ac",
+              "function": "FUN_000cbf96",
+              "address": "0xCBF96",
+              "file": "decomp_LF9G003T_0C0000.txt",
+              "reference_count": 1,
+              "lines": [
+                8577
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xD5030",
+          "references": []
+        },
+        {
+          "literal_address": "0xF6784",
+          "references": [
+            {
+              "alias": "PTR_DAT_000f6784",
+              "function": "FUN_000f6614",
+              "address": "0xF6614",
+              "file": "decomp_LF9G003T_0C0000.txt",
+              "reference_count": 3,
+              "lines": [
+                41445,
+                41446,
+                41454
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x105664",
+          "references": [
+            {
+              "alias": "PTR_DAT_00105664",
+              "function": "FUN_0010539c",
+              "address": "0x10539C",
+              "file": "decomp_LF9G003T_100000.txt",
+              "reference_count": 5,
+              "lines": [
+                4258,
+                4277,
+                4289,
+                4294,
+                4305
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x12DCA8",
+          "references": [
+            {
+              "alias": "PTR_DAT_0012dca8",
+              "function": "FUN_0012d628",
+              "address": "0x12D628",
+              "file": "decomp_LF9G003T_100000.txt",
+              "reference_count": 7,
+              "lines": [
+                39185,
+                39189,
+                39193,
+                39202,
+                39208,
+                39212,
+                39216
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x158180",
+          "references": [
+            {
+              "alias": "PTR_DAT_00158180",
+              "function": "FUN_00157e64",
+              "address": "0x157E64",
+              "file": "decomp_LF9G003T_140000.txt",
+              "reference_count": 2,
+              "lines": [
+                22594,
+                22624
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x1584BC",
+          "references": [
+            {
+              "alias": "PTR_DAT_001584bc",
+              "function": "FUN_00157e64",
+              "address": "0x157E64",
+              "file": "decomp_LF9G003T_140000.txt",
+              "reference_count": 4,
+              "lines": [
+                22650,
+                22657,
+                22663,
+                22671
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x17B6A4",
+          "references": []
+        },
+        {
+          "literal_address": "0x17C0F8",
+          "references": []
+        },
+        {
+          "literal_address": "0x1882EC",
+          "references": []
+        },
+        {
+          "literal_address": "0x18971C",
+          "references": []
+        },
+        {
+          "literal_address": "0x189A8C",
+          "references": []
+        },
+        {
+          "literal_address": "0x196E18",
+          "references": [
+            {
+              "alias": "PTR_DAT_00196e18",
+              "function": "FUN_00196b48",
+              "address": "0x196B48",
+              "file": "decomp_LF9G003T_180000.txt",
+              "reference_count": 4,
+              "lines": [
+                17218,
+                17222,
+                17255,
+                17256
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x19B158",
+          "references": [
+            {
+              "alias": "PTR_DAT_0019b158",
+              "function": "FUN_0019ac40",
+              "address": "0x19AC40",
+              "file": "decomp_LF9G003T_180000.txt",
+              "reference_count": 2,
+              "lines": [
+                20541,
+                20549
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x1C7E88",
+          "references": [
+            {
+              "alias": "PTR_DAT_001c7e88",
+              "function": "FUN_001c7c30",
+              "address": "0x1C7C30",
+              "file": "decomp_LF9G003T_1C0000.txt",
+              "reference_count": 3,
+              "lines": [
+                10055,
+                10062,
+                10089
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x1FE150",
+          "references": []
+        },
+        {
+          "literal_address": "0x1FE35C",
+          "references": []
+        },
+        {
+          "literal_address": "0x2017CC",
+          "references": []
+        },
+        {
+          "literal_address": "0x209EB8",
+          "references": [
+            {
+              "alias": "PTR_DAT_00209eb8",
+              "function": "FUN_00209e48",
+              "address": "0x209E48",
+              "file": "decomp_LF9G003T_200000.txt",
+              "reference_count": 1,
+              "lines": [
+                5380
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x20A198",
+          "references": [
+            {
+              "alias": "PTR_DAT_0020a198",
+              "function": "FUN_0020a130",
+              "address": "0x20A130",
+              "file": "decomp_LF9G003T_200000.txt",
+              "reference_count": 1,
+              "lines": [
+                5560
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "0xFFF8918A": {
+      "literal_count": 48,
+      "aliases": [
+        {
+          "literal_address": "0x7BDA8",
+          "references": [
+            {
+              "alias": "PTR_DAT_0007bda8",
+              "function": "FUN_0007baca",
+              "address": "0x7BACA",
+              "file": "decomp_LF9G003T_040000.txt",
+              "reference_count": 1,
+              "lines": [
+                3064
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x7CC40",
+          "references": [
+            {
+              "alias": "PTR_DAT_0007cc40",
+              "function": "sensor_proc_task_scaled",
+              "address": "0x7C8BC",
+              "file": "decomp_LF9G003T_040000.txt",
+              "reference_count": 1,
+              "lines": [
+                3767
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x90510",
+          "references": []
+        },
+        {
+          "literal_address": "0x919D4",
+          "references": [
+            {
+              "alias": "PTR_DAT_000919d4",
+              "function": "FUN_000917c4",
+              "address": "0x917C4",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                11814
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x92A84",
+          "references": [
+            {
+              "alias": "PTR_DAT_00092a84",
+              "function": "FUN_000928fc",
+              "address": "0x928FC",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                12078
+              ]
+            },
+            {
+              "alias": "PTR_DAT_00092a84",
+              "function": "FUN_00092962",
+              "address": "0x92962",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 3,
+              "lines": [
+                12119,
+                12124,
+                12125
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x92CEC",
+          "references": [
+            {
+              "alias": "PTR_DAT_00092cec",
+              "function": "FUN_00092aec",
+              "address": "0x92AEC",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 3,
+              "lines": [
+                12186,
+                12188,
+                12191
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x93064",
+          "references": [
+            {
+              "alias": "PTR_DAT_00093064",
+              "function": "FUN_00092e5a",
+              "address": "0x92E5A",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                12451
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x938A4",
+          "references": [
+            {
+              "alias": "PTR_DAT_000938a4",
+              "function": "FUN_00093668",
+              "address": "0x93668",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                12937
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000938a4",
+              "function": "FUN_00093708",
+              "address": "0x93708",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 2,
+              "lines": [
+                12970,
+                12971
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x951E4",
+          "references": [
+            {
+              "alias": "PTR_DAT_000951e4",
+              "function": "FUN_00095104",
+              "address": "0x95104",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 3,
+              "lines": [
+                13974,
+                13975,
+                13976
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x95364",
+          "references": [
+            {
+              "alias": "PTR_DAT_00095364",
+              "function": "FUN_00095264",
+              "address": "0x95264",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 3,
+              "lines": [
+                14040,
+                14086,
+                14088
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x955F4",
+          "references": [
+            {
+              "alias": "PTR_DAT_000955f4",
+              "function": "FUN_000954ca",
+              "address": "0x954CA",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                14170
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x95B74",
+          "references": [
+            {
+              "alias": "PTR_DAT_00095b74",
+              "function": "FUN_000959b0",
+              "address": "0x959B0",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                14478
+              ]
+            },
+            {
+              "alias": "PTR_DAT_00095b74",
+              "function": "FUN_000959dc",
+              "address": "0x959DC",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 2,
+              "lines": [
+                14500,
+                14505
+              ]
+            },
+            {
+              "alias": "PTR_DAT_00095b74",
+              "function": "FUN_00095a60",
+              "address": "0x95A60",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 2,
+              "lines": [
+                14539,
+                14543
+              ]
+            },
+            {
+              "alias": "PTR_DAT_00095b74",
+              "function": "FUN_00095acc",
+              "address": "0x95ACC",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                14572
+              ]
+            },
+            {
+              "alias": "PTR_DAT_00095b74",
+              "function": "FUN_00095af8",
+              "address": "0x95AF8",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                14599
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x95DA4",
+          "references": [
+            {
+              "alias": "PTR_DAT_00095da4",
+              "function": "FUN_00095af8",
+              "address": "0x95AF8",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                14604
+              ]
+            },
+            {
+              "alias": "PTR_DAT_00095da4",
+              "function": "FUN_00095bd6",
+              "address": "0x95BD6",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                14631
+              ]
+            },
+            {
+              "alias": "PTR_DAT_00095da4",
+              "function": "FUN_00095d6a",
+              "address": "0x95D6A",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 4,
+              "lines": [
+                14796,
+                14800,
+                14801,
+                14805
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x9602C",
+          "references": [
+            {
+              "alias": "PTR_DAT_0009602c",
+              "function": "FUN_00095d6a",
+              "address": "0x95D6A",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                14820
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xAC0A8",
+          "references": [
+            {
+              "alias": "PTR_DAT_000ac0a8",
+              "function": "FUN_000ab8e0",
+              "address": "0xAB8E0",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                26937
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xB4EC8",
+          "references": [
+            {
+              "alias": "PTR_DAT_000b4ec8",
+              "function": "FUN_000b4e46",
+              "address": "0xB4E46",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33455
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xB50D8",
+          "references": [
+            {
+              "alias": "PTR_DAT_000b50d8",
+              "function": "FUN_000b4ffe",
+              "address": "0xB4FFE",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 2,
+              "lines": [
+                33537,
+                33543
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000b50d8",
+              "function": "FUN_000b5052",
+              "address": "0xB5052",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33559
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xB539C",
+          "references": [
+            {
+              "alias": "PTR_DAT_000b539c",
+              "function": "FUN_000b51c6",
+              "address": "0xB51C6",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33669
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000b539c",
+              "function": "FUN_000b5294",
+              "address": "0xB5294",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33696
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000b539c",
+              "function": "FUN_000b52d0",
+              "address": "0xB52D0",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33717
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000b539c",
+              "function": "FUN_000b5310",
+              "address": "0xB5310",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33731
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xB55D4",
+          "references": [
+            {
+              "alias": "PTR_DAT_000b55d4",
+              "function": "FUN_000b53c0",
+              "address": "0xB53C0",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33753
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000b55d4",
+              "function": "FUN_000b543c",
+              "address": "0xB543C",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33801
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000b55d4",
+              "function": "FUN_000b54c6",
+              "address": "0xB54C6",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33831
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000b55d4",
+              "function": "FUN_000b550e",
+              "address": "0xB550E",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33851
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000b55d4",
+              "function": "FUN_000b558c",
+              "address": "0xB558C",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 2,
+              "lines": [
+                33872,
+                33873
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xB5868",
+          "references": [
+            {
+              "alias": "PTR_DAT_000b5868",
+              "function": "FUN_000b5648",
+              "address": "0xB5648",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33896
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xB7C8C",
+          "references": [
+            {
+              "alias": "PTR_DAT_000b7c8c",
+              "function": "FUN_000b7ada",
+              "address": "0xB7ADA",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 3,
+              "lines": [
+                35994,
+                36001,
+                36007
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xCE764",
+          "references": [
+            {
+              "alias": "PTR_DAT_000ce764",
+              "function": "FUN_000ce588",
+              "address": "0xCE588",
+              "file": "decomp_LF9G003T_0C0000.txt",
+              "reference_count": 1,
+              "lines": [
+                9240
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000ce764",
+              "function": "FUN_000ce6b2",
+              "address": "0xCE6B2",
+              "file": "decomp_LF9G003T_0C0000.txt",
+              "reference_count": 1,
+              "lines": [
+                9280
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xCEA40",
+          "references": []
+        },
+        {
+          "literal_address": "0xCEC74",
+          "references": [
+            {
+              "alias": "PTR_DAT_000cec74",
+              "function": "FUN_000ceb72",
+              "address": "0xCEB72",
+              "file": "decomp_LF9G003T_0C0000.txt",
+              "reference_count": 1,
+              "lines": [
+                9367
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xE4F58",
+          "references": [
+            {
+              "alias": "PTR_DAT_000e4f58",
+              "function": "FUN_000e42a8",
+              "address": "0xE42A8",
+              "file": "decomp_LF9G003T_0C0000.txt",
+              "reference_count": 4,
+              "lines": [
+                26030,
+                26034,
+                26059,
+                26060
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x105308",
+          "references": [
+            {
+              "alias": "PTR_DAT_00105308",
+              "function": "FUN_00104ff8",
+              "address": "0x104FF8",
+              "file": "decomp_LF9G003T_100000.txt",
+              "reference_count": 3,
+              "lines": [
+                4178,
+                4180,
+                4213
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x1110EC",
+          "references": [
+            {
+              "alias": "PTR_DAT_001110ec",
+              "function": "FUN_00110498",
+              "address": "0x110498",
+              "file": "decomp_LF9G003T_100000.txt",
+              "reference_count": 3,
+              "lines": [
+                15085,
+                15086,
+                15111
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x111478",
+          "references": [
+            {
+              "alias": "PTR_DAT_00111478",
+              "function": "FUN_00110498",
+              "address": "0x110498",
+              "file": "decomp_LF9G003T_100000.txt",
+              "reference_count": 3,
+              "lines": [
+                15136,
+                15145,
+                15163
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x1117A4",
+          "references": [
+            {
+              "alias": "PTR_DAT_001117a4",
+              "function": "FUN_00110498",
+              "address": "0x110498",
+              "file": "decomp_LF9G003T_100000.txt",
+              "reference_count": 3,
+              "lines": [
+                15180,
+                15192,
+                15201
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x111AF8",
+          "references": [
+            {
+              "alias": "PTR_DAT_00111af8",
+              "function": "FUN_00110498",
+              "address": "0x110498",
+              "file": "decomp_LF9G003T_100000.txt",
+              "reference_count": 2,
+              "lines": [
+                15270,
+                15276
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x12E064",
+          "references": [
+            {
+              "alias": "PTR_DAT_0012e064",
+              "function": "FUN_0012d628",
+              "address": "0x12D628",
+              "file": "decomp_LF9G003T_100000.txt",
+              "reference_count": 2,
+              "lines": [
+                39263,
+                39275
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x134888",
+          "references": [
+            {
+              "alias": "PTR_DAT_00134888",
+              "function": "FUN_00133648",
+              "address": "0x133648",
+              "file": "decomp_LF9G003T_100000.txt",
+              "reference_count": 2,
+              "lines": [
+                44166,
+                44204
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x140718",
+          "references": [
+            {
+              "alias": "PTR_DAT_00140718",
+              "function": "FUN_00140638",
+              "address": "0x140638",
+              "file": "decomp_LF9G003T_140000.txt",
+              "reference_count": 2,
+              "lines": [
+                544,
+                550
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x1411F0",
+          "references": [
+            {
+              "alias": "PTR_DAT_001411f0",
+              "function": "FUN_00140784",
+              "address": "0x140784",
+              "file": "decomp_LF9G003T_140000.txt",
+              "reference_count": 2,
+              "lines": [
+                708,
+                709
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x17A950",
+          "references": []
+        },
+        {
+          "literal_address": "0x17AC7C",
+          "references": []
+        },
+        {
+          "literal_address": "0x189724",
+          "references": []
+        },
+        {
+          "literal_address": "0x189A98",
+          "references": []
+        },
+        {
+          "literal_address": "0x1945A8",
+          "references": [
+            {
+              "alias": "PTR_DAT_001945a8",
+              "function": "FUN_00194068",
+              "address": "0x194068",
+              "file": "decomp_LF9G003T_180000.txt",
+              "reference_count": 2,
+              "lines": [
+                15996,
+                15997
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x1AAFEC",
+          "references": [
+            {
+              "alias": "PTR_DAT_001aafec",
+              "function": "FUN_001aacd8",
+              "address": "0x1AACD8",
+              "file": "decomp_LF9G003T_180000.txt",
+              "reference_count": 7,
+              "lines": [
+                35242,
+                35245,
+                35259,
+                35261,
+                35263,
+                35265,
+                35282
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x1AB340",
+          "references": [
+            {
+              "alias": "PTR_DAT_001ab340",
+              "function": "FUN_001aacd8",
+              "address": "0x1AACD8",
+              "file": "decomp_LF9G003T_180000.txt",
+              "reference_count": 3,
+              "lines": [
+                35292,
+                35301,
+                35309
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x1EA93C",
+          "references": []
+        },
+        {
+          "literal_address": "0x1EABC4",
+          "references": []
+        },
+        {
+          "literal_address": "0x1EAE74",
+          "references": []
+        },
+        {
+          "literal_address": "0x1EB0F8",
+          "references": [
+            {
+              "alias": "PTR_DAT_001eb0f8",
+              "function": "FUN_001eaf76",
+              "address": "0x1EAF76",
+              "file": "decomp_LF9G003T_1C0000.txt",
+              "reference_count": 1,
+              "lines": [
+                39044
+              ]
+            },
+            {
+              "alias": "PTR_DAT_001eb0f8",
+              "function": "FUN_001eb01a",
+              "address": "0x1EB01A",
+              "file": "decomp_LF9G003T_1C0000.txt",
+              "reference_count": 1,
+              "lines": [
+                39090
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x1EB314",
+          "references": [
+            {
+              "alias": "PTR_DAT_001eb314",
+              "function": "FUN_001eb08c",
+              "address": "0x1EB08C",
+              "file": "decomp_LF9G003T_1C0000.txt",
+              "reference_count": 1,
+              "lines": [
+                39135
+              ]
+            },
+            {
+              "alias": "PTR_DAT_001eb314",
+              "function": "FUN_001eb15c",
+              "address": "0x1EB15C",
+              "file": "decomp_LF9G003T_1C0000.txt",
+              "reference_count": 1,
+              "lines": [
+                39176
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x1EB620",
+          "references": [
+            {
+              "alias": "PTR_DAT_001eb620",
+              "function": "FUN_001eb408",
+              "address": "0x1EB408",
+              "file": "decomp_LF9G003T_1C0000.txt",
+              "reference_count": 1,
+              "lines": [
+                39383
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x1EB894",
+          "references": [
+            {
+              "alias": "PTR_DAT_001eb894",
+              "function": "FUN_001eb6c8",
+              "address": "0x1EB6C8",
+              "file": "decomp_LF9G003T_1C0000.txt",
+              "reference_count": 1,
+              "lines": [
+                39422
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "0xFFF89934": {
+      "literal_count": 2,
+      "aliases": [
+        {
+          "literal_address": "0xB5110",
+          "references": [
+            {
+              "alias": "PTR_DAT_000b5110",
+              "function": "FUN_000b4ffe",
+              "address": "0xB4FFE",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 3,
+              "lines": [
+                33540,
+                33544,
+                33545
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xB561C",
+          "references": [
+            {
+              "alias": "PTR_DAT_000b561c",
+              "function": "FUN_000b543c",
+              "address": "0xB543C",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33805
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000b561c",
+              "function": "FUN_000b550e",
+              "address": "0xB550E",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33855
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "0xFFF89938": {
+      "literal_count": 3,
+      "aliases": [
+        {
+          "literal_address": "0xB4ED8",
+          "references": [
+            {
+              "alias": "PTR_DAT_000b4ed8",
+              "function": "FUN_000b4e46",
+              "address": "0xB4E46",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 3,
+              "lines": [
+                33457,
+                33458,
+                33461
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xB535C",
+          "references": [
+            {
+              "alias": "PTR_DAT_000b535c",
+              "function": "FUN_000b516a",
+              "address": "0xB516A",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33631
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000b535c",
+              "function": "FUN_000b5294",
+              "address": "0xB5294",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33691
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xB5638",
+          "references": [
+            {
+              "alias": "PTR_DAT_000b5638",
+              "function": "FUN_000b54c6",
+              "address": "0xB54C6",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33826
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "0xFFF8993A": {
+      "literal_count": 3,
+      "aliases": [
+        {
+          "literal_address": "0xB50D4",
+          "references": [
+            {
+              "alias": "PTR_DAT_000b50d4",
+              "function": "FUN_000b5052",
+              "address": "0xB5052",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33558
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xB5398",
+          "references": [
+            {
+              "alias": "PTR_DAT_000b5398",
+              "function": "FUN_000b51c6",
+              "address": "0xB51C6",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33668
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000b5398",
+              "function": "FUN_000b5294",
+              "address": "0xB5294",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33696
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000b5398",
+              "function": "FUN_000b52d0",
+              "address": "0xB52D0",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33716
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000b5398",
+              "function": "FUN_000b5310",
+              "address": "0xB5310",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33731
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xB5618",
+          "references": [
+            {
+              "alias": "PTR_DAT_000b5618",
+              "function": "FUN_000b543c",
+              "address": "0xB543C",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33801
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000b5618",
+              "function": "FUN_000b54c6",
+              "address": "0xB54C6",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33831
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000b5618",
+              "function": "FUN_000b550e",
+              "address": "0xB550E",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33851
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "0xFFF89126": {
+      "literal_count": 32,
+      "aliases": [
+        {
+          "literal_address": "0x7DD5C",
+          "references": [
+            {
+              "alias": "PTR_DAT_0007dd5c",
+              "function": "FUN_0007dbb2",
+              "address": "0x7DBB2",
+              "file": "decomp_LF9G003T_040000.txt",
+              "reference_count": 1,
+              "lines": [
+                4645
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x7DFD8",
+          "references": [
+            {
+              "alias": "PTR_DAT_0007dfd8",
+              "function": "FUN_0007dccc",
+              "address": "0x7DCCC",
+              "file": "decomp_LF9G003T_040000.txt",
+              "reference_count": 2,
+              "lines": [
+                4737,
+                4746
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x84088",
+          "references": [
+            {
+              "alias": "PTR_DAT_00084088",
+              "function": "FUN_00083e84",
+              "address": "0x83E84",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                2330
+              ]
+            },
+            {
+              "alias": "PTR_DAT_00084088",
+              "function": "FUN_00083eec",
+              "address": "0x83EEC",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                2360
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x84888",
+          "references": [
+            {
+              "alias": "PTR_DAT_00084888",
+              "function": "FUN_000846da",
+              "address": "0x846DA",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                2791
+              ]
+            },
+            {
+              "alias": "PTR_DAT_00084888",
+              "function": "FUN_00084716",
+              "address": "0x84716",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                2810
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x84B54",
+          "references": [
+            {
+              "alias": "PTR_DAT_00084b54",
+              "function": "FUN_00084a3e",
+              "address": "0x84A3E",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                3000
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x87DA0",
+          "references": [
+            {
+              "alias": "PTR_DAT_00087da0",
+              "function": "FUN_00087c9e",
+              "address": "0x87C9E",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                5375
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x8E72C",
+          "references": [
+            {
+              "alias": "PTR_DAT_0008e72c",
+              "function": "FUN_0008e4fa",
+              "address": "0x8E4FA",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                9553
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x8E9CC",
+          "references": []
+        },
+        {
+          "literal_address": "0x90858",
+          "references": [
+            {
+              "alias": "PTR_DAT_00090858",
+              "function": "FUN_00090450",
+              "address": "0x90450",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                10808
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x90EDC",
+          "references": [
+            {
+              "alias": "PTR_DAT_00090edc",
+              "function": "FUN_00090db8",
+              "address": "0x90DB8",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 3,
+              "lines": [
+                11297,
+                11298,
+                11301
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x91784",
+          "references": [
+            {
+              "alias": "PTR_DAT_00091784",
+              "function": "FUN_00091594",
+              "address": "0x91594",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                11696
+              ]
+            },
+            {
+              "alias": "PTR_DAT_00091784",
+              "function": "FUN_0009166c",
+              "address": "0x9166C",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                11737
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x94C8C",
+          "references": [
+            {
+              "alias": "PTR_DAT_00094c8c",
+              "function": "FUN_00094aa8",
+              "address": "0x94AA8",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                13733
+              ]
+            },
+            {
+              "alias": "PTR_DAT_00094c8c",
+              "function": "FUN_00094bfc",
+              "address": "0x94BFC",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                13790
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x96078",
+          "references": [
+            {
+              "alias": "PTR_DAT_00096078",
+              "function": "FUN_00095ec2",
+              "address": "0x95EC2",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                14877
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x96300",
+          "references": [
+            {
+              "alias": "PTR_DAT_00096300",
+              "function": "FUN_0009608c",
+              "address": "0x9608C",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                14956
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x96548",
+          "references": [
+            {
+              "alias": "PTR_DAT_00096548",
+              "function": "FUN_0009639c",
+              "address": "0x9639C",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                15113
+              ]
+            },
+            {
+              "alias": "PTR_DAT_00096548",
+              "function": "FUN_0009641a",
+              "address": "0x9641A",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                15153
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xB438C",
+          "references": [
+            {
+              "alias": "PTR_DAT_000b438c",
+              "function": "FUN_000b4102",
+              "address": "0xB4102",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                32960
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xB50FC",
+          "references": [
+            {
+              "alias": "PTR_DAT_000b50fc",
+              "function": "FUN_000b4ffe",
+              "address": "0xB4FFE",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33538
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xB5354",
+          "references": [
+            {
+              "alias": "PTR_DAT_000b5354",
+              "function": "FUN_000b516a",
+              "address": "0xB516A",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33625
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xB5630",
+          "references": [
+            {
+              "alias": "PTR_DAT_000b5630",
+              "function": "FUN_000b543c",
+              "address": "0xB543C",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33809
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000b5630",
+              "function": "FUN_000b54c6",
+              "address": "0xB54C6",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33824
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xBF0BC",
+          "references": [
+            {
+              "alias": "PTR_DAT_000bf0bc",
+              "function": "FUN_000bed18",
+              "address": "0xBED18",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                42044
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xC3E18",
+          "references": [
+            {
+              "alias": "PTR_DAT_000c3e18",
+              "function": "FUN_000c3bfc",
+              "address": "0xC3BFC",
+              "file": "decomp_LF9G003T_0C0000.txt",
+              "reference_count": 1,
+              "lines": [
+                2272
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x110DDC",
+          "references": [
+            {
+              "alias": "PTR_DAT_00110ddc",
+              "function": "FUN_00110498",
+              "address": "0x110498",
+              "file": "decomp_LF9G003T_100000.txt",
+              "reference_count": 2,
+              "lines": [
+                15041,
+                15071
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x1110F8",
+          "references": [
+            {
+              "alias": "PTR_DAT_001110f8",
+              "function": "FUN_00110498",
+              "address": "0x110498",
+              "file": "decomp_LF9G003T_100000.txt",
+              "reference_count": 2,
+              "lines": [
+                15106,
+                15109
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x111AE4",
+          "references": [
+            {
+              "alias": "PTR_DAT_00111ae4",
+              "function": "FUN_00110498",
+              "address": "0x110498",
+              "file": "decomp_LF9G003T_100000.txt",
+              "reference_count": 2,
+              "lines": [
+                15230,
+                15271
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x111E60",
+          "references": [
+            {
+              "alias": "PTR_DAT_00111e60",
+              "function": "FUN_00110498",
+              "address": "0x110498",
+              "file": "decomp_LF9G003T_100000.txt",
+              "reference_count": 2,
+              "lines": [
+                15308,
+                15327
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x142650",
+          "references": []
+        },
+        {
+          "literal_address": "0x142890",
+          "references": []
+        },
+        {
+          "literal_address": "0x16B788",
+          "references": [
+            {
+              "alias": "PTR_DAT_0016b788",
+              "function": "FUN_0016b46c",
+              "address": "0x16B46C",
+              "file": "decomp_LF9G003T_140000.txt",
+              "reference_count": 2,
+              "lines": [
+                41462,
+                41501
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x17139C",
+          "references": [
+            {
+              "alias": "PTR_DAT_0017139c",
+              "function": "FUN_00171070",
+              "address": "0x171070",
+              "file": "decomp_LF9G003T_140000.txt",
+              "reference_count": 3,
+              "lines": [
+                45828,
+                45831,
+                45842
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x1716FC",
+          "references": [
+            {
+              "alias": "PTR_DAT_001716fc",
+              "function": "FUN_00171070",
+              "address": "0x171070",
+              "file": "decomp_LF9G003T_140000.txt",
+              "reference_count": 3,
+              "lines": [
+                45850,
+                45873,
+                45875
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x17A960",
+          "references": []
+        },
+        {
+          "literal_address": "0x1E46C0",
+          "references": [
+            {
+              "alias": "PTR_DAT_001e46c0",
+              "function": "FUN_001e43b0",
+              "address": "0x1E43B0",
+              "file": "decomp_LF9G003T_1C0000.txt",
+              "reference_count": 2,
+              "lines": [
+                34636,
+                34641
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "0xFFF80ACE": {
+      "literal_count": 3,
+      "aliases": [
+        {
+          "literal_address": "0xB53A4",
+          "references": [
+            {
+              "alias": "PTR_DAT_000b53a4",
+              "function": "FUN_000b51c6",
+              "address": "0xB51C6",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33674
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xB5600",
+          "references": [
+            {
+              "alias": "PTR_DAT_000b5600",
+              "function": "FUN_000b541c",
+              "address": "0xB541C",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33782
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000b5600",
+              "function": "FUN_000b543c",
+              "address": "0xB543C",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33804
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000b5600",
+              "function": "FUN_000b550e",
+              "address": "0xB550E",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33854
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000b5600",
+              "function": "FUN_000b558c",
+              "address": "0xB558C",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33875
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0xB5894",
+          "references": [
+            {
+              "alias": "PTR_DAT_000b5894",
+              "function": "FUN_000b56b6",
+              "address": "0xB56B6",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33937
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000b5894",
+              "function": "FUN_000b56e0",
+              "address": "0xB56E0",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33954
+              ]
+            },
+            {
+              "alias": "PTR_DAT_000b5894",
+              "function": "FUN_000b5712",
+              "address": "0xB5712",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                33971
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

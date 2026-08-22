@@ -37,6 +37,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <vector>
@@ -224,6 +225,8 @@ private:
 // future-compatible changes can be detected at load time.
 [[nodiscard]] std::string to_toml(Graph const &g);
 [[nodiscard]] Result<Graph> from_toml(std::string_view text);
+[[nodiscard]] Status save_file(Graph const &g, std::filesystem::path const &path);
+[[nodiscard]] Result<Graph> load_file(std::filesystem::path const &path);
 
 // Style / completeness warnings — distinct from validate(), which
 // reports STRUCTURAL violations (cycles, dangling refs) that make a

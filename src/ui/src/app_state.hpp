@@ -10,23 +10,21 @@
 #ifndef ST_UI_APP_STATE_HPP
 #define ST_UI_APP_STATE_HPP
 
-#include "persistence.hpp" // RecentEntry, Settings
-
+#include "st/audit.hpp"
 #include "st/autotune.hpp"
 #include "st/defs/pack_registry.hpp"
+#include "st/diff.hpp"
 #include "st/edit.hpp"
 #include "st/feature.hpp"
-#include "st/diff.hpp"
 #include "st/log/adaptive_history.hpp"
 #include "st/log/coldstart.hpp"
 #include "st/log/ebcs.hpp"
 #include "st/log/knock_dashboard.hpp"
-#include "st/audit.hpp"
 #include "st/log/live_buffer.hpp"
 #include "st/profile.hpp"
 #include "st/project.hpp"
 
-#include <imgui.h> // ImVec2 / ImVec4 in features-designer + settings fields
+#include "persistence.hpp" // RecentEntry, Settings
 
 #include <algorithm>
 #include <atomic>
@@ -34,11 +32,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <imgui.h> // ImVec2 / ImVec4 in features-designer + settings fields
 #include <memory>
 #include <optional>
 #include <string>
-#include <unordered_set>
 #include <thread>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -97,6 +96,15 @@ struct Selection {
 enum class TableViewMode {
     Grid,
     Heatmap,
+};
+
+// Lightweight Map Explorer facets for the Tables sidebar. These are
+// presentation filters, not edit permissions.
+enum class TableExplorerScope : std::uint8_t {
+    All,
+    Safety,
+    Emissions,
+    Tagged,
 };
 
 // Coarse workspace presets driven by the left-rail icons. Selecting a
@@ -180,6 +188,9 @@ struct AppState {
     // chip (the project on disk is still saved — it just wasn't saved
     // by this session).
     std::optional<std::string> last_save_iso;
+    // True only after the current on-disk project was reopened and matched
+    // the in-memory ROM bytes, histories, metadata, and additional slots.
+    bool persisted_state_verified{false};
 
     // Path to the bundled fixtures/demo.stune project, resolved at
     // startup from argv[0] (best-effort, depends on the install
@@ -220,6 +231,20 @@ struct AppState {
     // mid-drag on a pin) and reset on completion or escape.
     bool show_features_designer{false};
     st::feature::Graph features_graph;
+    // Document state for the standalone/project-local .stmod currently shown
+    // in the designer. An empty path means the graph has never been saved.
+    std::filesystem::path features_document_path;
+    bool features_document_dirty{false};
+    bool features_open_load_dialog{false};
+    std::string features_compile_error;
+    std::string features_compile_arch;
+    std::string features_compile_ir;
+    std::string features_compile_gate;
+    std::string features_compile_graph_toml;
+    std::size_t features_compile_instructions{0};
+    std::size_t features_compile_hooks{0};
+    std::size_t features_compile_bytes{0};
+    std::size_t features_compile_ram_bytes{0};
     bool features_wiring_active{false};
     st::feature::NodeId features_wiring_from_node{0};
     st::feature::PinId features_wiring_from_pin{0};
@@ -282,6 +307,8 @@ struct AppState {
     // main-loop shortcut, consumed by the sidebar's next render.
     char table_filter[128]{};
     bool focus_table_filter{false};
+    TableExplorerScope table_explorer_scope{TableExplorerScope::All};
+    std::string table_explorer_category;
 
     // Command palette (Ctrl+K). Fuzzy/substring search across every
     // menu action, every table in the loaded pack, every panel toggle,
@@ -313,6 +340,10 @@ struct AppState {
     // standard dock tab-close X.
     bool show_tables_panel{true};
     bool show_table_view_panel{true};
+    // Project Readiness is the offline-first orientation surface. It is
+    // opt-in from View for now while the first version settles; it never
+    // claims ECU readiness without live identity/readback evidence.
+    bool show_readiness_panel{false};
     bool show_stats_panel{true};
     bool show_dtcs_panel{true};
     bool show_history_panel{true};
@@ -404,9 +435,9 @@ struct AppState {
     struct GaugeMeta {
         char const *name;
         char const *units;
-        double redline;    // shade above this in the mini-line band
-        double warn_above; // shade between this and redline (amber)
-        double warn_below; // shade below this (amber) — for AFR-style channels
+        double redline;     // shade above this in the mini-line band
+        double warn_above;  // shade between this and redline (amber)
+        double warn_below;  // shade below this (amber) — for AFR-style channels
         double display_min; // y-axis low bound
         double display_max; // y-axis high bound
         // Producing-table cross-reference (analyst Issue #15). Right-click
@@ -538,9 +569,9 @@ struct AppState {
     // contents don't get re-read every frame.
     bool show_help_modal{false};
     struct HelpTopic {
-        std::string id;      // filename stem ("00-overview", "10-glossary")
-        std::string title;   // derived from the first `# ` heading
-        std::string body;    // full markdown text
+        std::string id;    // filename stem ("00-overview", "10-glossary")
+        std::string title; // derived from the first `# ` heading
+        std::string body;  // full markdown text
     };
     std::vector<HelpTopic> help_topics;
     int help_active_topic{0};
@@ -782,10 +813,9 @@ struct AppState {
     char datalog_channels_filter[128]{};
 
     // F6 — datalog viewer modal. Source path, parsed columns, per-
-    // channel stats, plot-selection cursor all live file-static in
-    // src/ui/src/modals/datalog_viewer.cpp; AppState only carries
-    // the open-modal toggle.
-    bool show_datalog_viewer_modal{false};
+    // channel data and plot selection live file-statically in
+    // datalog_viewer.cpp; AppState only carries dock visibility.
+    bool show_log_explorer_panel{false};
 
     // Generic "Pull single file..." dialog. Takes an arbitrary AP
     // path, routes through ets_panel_read_file_sync, saves to a
@@ -826,8 +856,8 @@ struct AppState {
     enum class PtmMatch : std::uint8_t { Unknown, Match, Mismatch };
     PtmMatch ptm_inspect_vehicle_match{PtmMatch::Unknown};
     PtmMatch ptm_inspect_rom_sum_match{PtmMatch::Unknown};
-    std::string ptm_inspect_ap_vehicle_id;   // AP's marriage vehicle for tooltip
-    std::string ptm_inspect_ap_backupcksum;  // AP's stock-ROM MD5 for tooltip
+    std::string ptm_inspect_ap_vehicle_id;  // AP's marriage vehicle for tooltip
+    std::string ptm_inspect_ap_backupcksum; // AP's stock-ROM MD5 for tooltip
 
     // CSV import preview modal.
     bool show_csv_import_modal{false};

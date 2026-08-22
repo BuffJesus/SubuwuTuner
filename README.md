@@ -68,7 +68,7 @@ Listed honestly. Working means *runs end-to-end today*. Experimental means *the 
 
 ### Research In Progress
 
-- **Phase D flash-protocol close-out** — bench-rig RE of the Subaru bulk-transfer state machine. As of round 30, `0x34` → `0xB6` → `F6` writes flash bytes successfully; the close-out sequence (`0x37` → `0xB7`) is dispatched but the state-byte=1 setter is still untraced
+- **Phase D flash-protocol close-out** — the `0xB6` payload cipher is now byte-confirmed as the same four-round Feistel path on SH-2A and RH850. Safe FCU sequencing, durable array-flash proof, interruption behavior, and restore validation remain open; writes stay gated.
 - **Per-ISA brick-protection HIL coverage** — host-side recovery model documented for SH-2A (single-bank serial-boot) and RH850 (dual-bank atomic-swap); bench-rig HIL coverage is the remaining ship gate
 - **Patch insertion layer** (`src/feature_patch/`) — finds free RAM, writes hook tables, splices into existing vector tables; needs real ECU vector tables to develop against
 
@@ -279,7 +279,7 @@ Fifty-seven structured analyst↔implementer rounds across a junkyard LF79002P b
 
 - **Phase D + flash write chain.** Wire is `34 04 33 <addr-3> <size-3>` → `74 20 01 04`. SA L1 + Programming session is sufficient; SA L3 is *not* required for Phase D (round-49 thought otherwise, round-51 refuted it). Phase D accepts negotiations up to at least 2 MB. Erase via `31 01 02 01 0F FF FF FF` is range-scoped to the negotiated range. `0xB6` is fixed at exactly 260 wire bytes (SID + 3-addr + 256-data). `0x37` takes no body. The full chain lives in `subaru-flash-write-cycle` and `subaru-dsc-unblock-sequence --write-cycle`.
 
-- **Commit gate.** Wire `31 01 02 02 01`. Handler decompiled at ROM `0x319E`. Three preconditions: session-state cell == 5, optionRecord == 1, and `u16 BE sum(0x6000..0x200000) == 0x5AA5`. That sentinel is **the brick-protection contract**: every production tune must preserve it. COBB tunes do; ours will. The sum helper at ROM `0x3582` is a naive u16 BE accumulator — no skip ranges, no masking, no special cells.
+- **Finalization and sum gate.** Stock finalization is SID `0x37`; the formerly cited `31 01 02 02 01` / ROM `0x319E` path is bench-donor or image-specific, not the universal stock commit. The 2 MiB SH-2A runtime invariant is still `u16 BE sum(0x6000..0x200000) == 0x5AA5`, including balance word `0x1FFFFE`. A.3 uses `[0x6000,0x280000)` and balance `0x27FFFE`.
 
 - **Boot integrity.** `FUN_00000C54` three-signature gate before the application JMP at `0x001F094C`: `0x5555` at `0x6000` (in FACI-locked EB02), `0xAAAA` at `0x1FFFF2`, and `*0x6C == *0x6010`. Any drift in those bytes and the ECU runs CPU but never powers up its CAN transceiver.
 
@@ -301,7 +301,7 @@ Three layered mistakes, each defensible alone.
 
 **`F6` is not a receipt.** Every one of 8064 `0xB6` blocks during the 2 MB restore returned `F6`. `0xB7` readback at the negotiated_start matched stock content. The commit still failed the sum check. The next cold boot found enough damage in regions we never verified to halt before CAN init. The FCU's staging buffer is what `0xB7` reads back; real flash is what the sum check (and the boot integrity check) reads. The two can disagree. Ours did.
 
-**Verification means crossing a power cycle.** The only decisive "did this write actually land?" check is SSM-A8 RMBA in default session AFTER a power cycle. `0xB7` staging-buffer readback is a fast iteration tool, not an integrity check. We shipped the write chain without the post-cycle verify and trusted the staging readback. Each individual decision was defensible; the combination was not.
+**Verification means crossing a power cycle.** The decisive "did this write actually land?" check is an independent flash read in default session after a power cycle. On the adapter path previously called SSM-A8, the adapter translates to SID `0x23` RMBA; `0xB7` staging-buffer readback is not an integrity check.
 
 ### Lessons baked into the architecture
 
@@ -313,11 +313,31 @@ Three layered mistakes, each defensible alone.
 
 - **Boot integrity is the line in the sand.** Three signatures gate the application JMP. Tune-export pipeline must refuse any write plan that touches those addresses without an explicit override + matching restore plan. (Yes, COBB pre-flight does the same thing.)
 
-- **Bench testing is mandatory and benches are expendable.** ~$80 of inbound Renesas E2 Lite JTAG resurrects this rig from `bench-junkyard-stock.bin`. Cheaper than a single ECU control module from the dealer.
+- **Bench testing is mandatory and benches are expendable.** The original
+  LF79002P bench ECU is currently silent after power-cycle. The former E2-Lite
+  recovery purchase is withdrawn; exact-board probe support is unvalidated.
+  The immediate path is a qualified recovery service or an exact-CID donor,
+  while the DIY SH-2A probe remains a separate research track.
 
-Cost: one junkyard ECU + ~$80 of inbound JTAG. Bought: a clean-room model of the Subaru DIT flash protocol, the brick-protection-contract architecture for tune deployment, and the conviction not to trust an FCU staging buffer ever again.
+Cost so far: one junkyard ECU and the bench-rig build. Bought: a clean-room
+model of the Subaru DIT flash protocol, the brick-protection-contract
+architecture for tune deployment, and the conviction not to trust an FCU
+staging buffer ever again.
 
 ---
+
+## Current status (2026-08-02)
+
+The LF79002P bench ECU is silent after power-cycle. The former E2-Lite
+recovery purchase is withdrawn; exact-board probe support is unvalidated.
+The immediate hardware path is a qualified recovery service or an exact-CID
+replacement donor. Hardware-independent work continues through readiness,
+checkpoint, preflight, compare, restore, Atlas, reverse-engineering, and Map
+Explorer tracks. The GUI now binds approved exact-CID calibration regions into
+offline Flash Review while keeping live observed-CID proof as a hard blocker;
+the Tables sidebar has category and safety/emissions Map Explorer facets.
+See [docs/47-task-list.md](docs/47-task-list.md) and
+[docs/50-replacement-ecu-intake.md](docs/50-replacement-ecu-intake.md).
 
 ## Disclaimer
 

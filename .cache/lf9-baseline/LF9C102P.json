@@ -1,0 +1,27 @@
+{
+  "schema": "subuwutuner.rom-decompile-baseline.v1",
+  "source": {
+    "path": "D:\\Subuwu\\findings\\engine-ecu-rom-plaintext\\2018_LF9C102P\\rom.bin",
+    "size": 2072576,
+    "sha256": "9eaa074fd4a5e17faedc9e965431e98f3c6e392c33033d6a680c9d59dbe4d90a",
+    "image_base": 24576,
+    "image_end_exclusive": 2097152
+  },
+  "index": {
+    "path": "D:\\Subuwu\\findings\\decompile\\lf9c102p\\function_index_named.txt",
+    "program": "LF9C102P.bin",
+    "language": "SuperH:BE:32:SH-2A",
+    "base": 0,
+    "modeled_memory_bytes": 6266880,
+    "function_count": 7101,
+    "named_function_count": 226,
+    "unnamed_function_count": 6875,
+    "functions_within_source_mapping": 7101,
+    "functions_outside_source_mapping": 0,
+    "outside_source_addresses": []
+  },
+  "interpretation": {
+    "modeled_memory_is_source_size": false,
+    "modeled_memory_note": "Ghidra modeled-memory size includes added RAM/register blocks; source.size and source.sha256 identify the imported ROM bytes."
+  }
+}

@@ -1,0 +1,134 @@
+{
+  "schema": "subuwutuner.rom-pointer-aliases.v1",
+  "targets": {
+    "0x280000": {
+      "literal_count": 18,
+      "aliases": [
+        {
+          "literal_address": "0x14DAE",
+          "references": []
+        },
+        {
+          "literal_address": "0x14DCE",
+          "references": []
+        },
+        {
+          "literal_address": "0x2F19D",
+          "references": []
+        },
+        {
+          "literal_address": "0x31A88",
+          "references": []
+        },
+        {
+          "literal_address": "0x3384F",
+          "references": []
+        },
+        {
+          "literal_address": "0x3386B",
+          "references": []
+        },
+        {
+          "literal_address": "0x383C1",
+          "references": []
+        },
+        {
+          "literal_address": "0x383C7",
+          "references": []
+        },
+        {
+          "literal_address": "0x39619",
+          "references": []
+        },
+        {
+          "literal_address": "0x46850",
+          "references": []
+        },
+        {
+          "literal_address": "0x48772",
+          "references": [
+            {
+              "alias": "DAT_00048772",
+              "function": "FUN_00156a60",
+              "address": "0x156A60",
+              "file": "decomp_LF9G003T_140000.txt",
+              "reference_count": 2,
+              "lines": [
+                21627,
+                21628
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x4F649",
+          "references": []
+        },
+        {
+          "literal_address": "0x54CC6",
+          "references": []
+        },
+        {
+          "literal_address": "0x54D0A",
+          "references": []
+        },
+        {
+          "literal_address": "0x5B5C1",
+          "references": []
+        },
+        {
+          "literal_address": "0x272B9A",
+          "references": []
+        },
+        {
+          "literal_address": "0x272BA3",
+          "references": []
+        },
+        {
+          "literal_address": "0x2757AE",
+          "references": []
+        }
+      ]
+    },
+    "0x27FFFE": {
+      "literal_count": 0,
+      "aliases": []
+    },
+    "0x6000": {
+      "literal_count": 4,
+      "aliases": [
+        {
+          "literal_address": "0x356F4",
+          "references": []
+        },
+        {
+          "literal_address": "0x5273F",
+          "references": []
+        },
+        {
+          "literal_address": "0x5D746",
+          "references": [
+            {
+              "alias": "DAT_0005d746",
+              "function": "FUN_0011d670",
+              "address": "0x11D670",
+              "file": "decomp_LF9G003T_100000.txt",
+              "reference_count": 1,
+              "lines": [
+                25613
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x2791B4",
+          "references": []
+        }
+      ]
+    },
+    "0x5AA5": {
+      "literal_count": 0,
+      "aliases": []
+    }
+  }
+}

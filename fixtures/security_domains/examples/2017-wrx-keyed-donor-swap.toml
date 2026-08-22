@@ -1,0 +1,32 @@
+[swap]
+schema_version = 1
+profile = "2017-wrx-keyed"
+project = "Example authorized donor-set swap"
+
+[[module]]
+id = "ecm"
+disposition = "donor_matched"
+present = true
+registration = "registered"
+evidence = "Record the registration work order or owned-system observation here."
+
+[[module]]
+id = "body_integrated_unit"
+disposition = "retained"
+present = true
+registration = "not_required"
+evidence = "Original chassis module retained."
+
+[[module]]
+id = "immobilizer_control_module"
+disposition = "retained"
+present = true
+registration = "not_required"
+evidence = "Original chassis module retained."
+
+[[module]]
+id = "combination_meter"
+disposition = "retained"
+present = true
+registration = "not_required"
+evidence = "Original chassis module retained."

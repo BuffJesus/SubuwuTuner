@@ -2,16 +2,21 @@
 // Copyright 2026 The SubuwuTuner Authors
 
 #include "st/core/error.hpp"
+#include "st/defs.hpp"
+#include "st/edit.hpp"
 #include "st/project.hpp"
 #include "st/rom.hpp"
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <ios>
 #include <random>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -43,6 +48,16 @@ void write_text(std::filesystem::path const &p, std::string_view text) {
     std::filesystem::create_directories(p.parent_path());
     std::ofstream out{p};
     out << text;
+}
+
+std::string read_text(std::filesystem::path const &p) {
+    // rdbuf rather than istreambuf_iterator: GCC 15's -O3 inliner raises a
+    // false-positive -Werror=null-dereference on the iterator-range string
+    // construction.
+    std::ifstream in{p, std::ios::binary};
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
 }
 
 // Build a minimal usable pack on disk and return its path. The pack matches
@@ -162,6 +177,72 @@ TEST_CASE("Project::save_working_rom persists in-memory edits to disk", "[projec
     REQUIRE(p2->working_rom().crc32() == expected_crc);
     // Source remains untouched.
     REQUIRE(p2->source_rom().data()[10] == 0xFF);
+}
+
+TEST_CASE("Project persisted-state verification reopens saved ROM bytes and history",
+          "[project][save][verify]") {
+    TempDir td;
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const rom_path = td.path / "stock.bin";
+    write_bytes(rom_path, make_rom_bytes());
+    auto const proj_dir = td.path / "verified.stune";
+
+    auto project = st::Project::create(proj_dir, rom_path, pack_dir, "verified");
+    REQUIRE(project.has_value());
+    REQUIRE(project->working_rom().write_u8(10, 0xA5).has_value());
+    project->history().record(
+        st::edit::Edit::bytes({{10, 0xFF, 0xA5}}, "verified byte edit"));
+    REQUIRE(project->save_all().has_value());
+    CHECK(project->verify_persisted_state().has_value());
+}
+
+TEST_CASE("Project persisted-state verification detects on-disk ROM drift",
+          "[project][save][verify]") {
+    TempDir td;
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const rom_path = td.path / "stock.bin";
+    write_bytes(rom_path, make_rom_bytes());
+    auto const proj_dir = td.path / "drifted.stune";
+
+    auto project = st::Project::create(proj_dir, rom_path, pack_dir, "drifted");
+    REQUIRE(project.has_value());
+    REQUIRE(project->save_all().has_value());
+
+    auto drifted = make_rom_bytes();
+    drifted[10] = 0xA5;
+    write_bytes(proj_dir / "working.bin", drifted);
+    auto const verification = project->verify_persisted_state();
+    REQUIRE_FALSE(verification.has_value());
+    CHECK(verification.error().code() == st::ErrorCode::BadChecksum);
+}
+
+TEST_CASE("Project persisted-state verification detects edit-record drift",
+          "[project][save][verify]") {
+    TempDir td;
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const rom_path = td.path / "stock.bin";
+    write_bytes(rom_path, make_rom_bytes());
+    auto const proj_dir = td.path / "history-drift.stune";
+
+    auto project = st::Project::create(proj_dir, rom_path, pack_dir, "history drift");
+    REQUIRE(project.has_value());
+    project->history().record(
+        st::edit::Edit::bytes({{10, 0xFF, 0xA5}}, "original description"));
+    REQUIRE(project->working_rom().write_u8(10, 0xA5).has_value());
+    REQUIRE(project->save_all().has_value());
+
+    auto edits = read_text(proj_dir / "edits.toml");
+    auto const original = std::string{"original description"};
+    auto const replacement = std::string{"tampered description"};
+    auto const position = edits.find(original);
+    REQUIRE(position != std::string::npos);
+    edits.replace(position, original.size(), replacement);
+    write_text(proj_dir / "edits.toml", edits);
+
+    auto const verification = project->verify_persisted_state();
+    REQUIRE_FALSE(verification.has_value());
+    CHECK(verification.error().code() == st::ErrorCode::BadChecksum);
+    CHECK(verification.error().to_string().find("edit history") != std::string::npos);
 }
 
 TEST_CASE("Project::open refuses a non-project directory", "[project][open]") {
@@ -1364,4 +1445,447 @@ TEST_CASE("Project::handheld_serial preserves empty on default save / reopen",
     auto reopened = st::Project::open(proj_dir);
     REQUIRE(reopened.has_value());
     REQUIRE(reopened->handheld_serial().empty());
+}
+
+TEST_CASE("Project checkpoints capture immutable working-ROM snapshots",
+          "[project][checkpoint]") {
+    TempDir td;
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const rom_path = td.path / "stock.bin";
+    write_bytes(rom_path, make_rom_bytes());
+    auto const proj_dir = td.path / "checkpoints.stune";
+
+    auto p = st::Project::create(proj_dir, rom_path, pack_dir, "checkpoints");
+    REQUIRE(p.has_value());
+    REQUIRE(p->working_rom().write_u8(3, 0xA5).has_value());
+
+    auto const checkpoint = p->create_checkpoint(
+        "before-flash", "Before Flash", "Known-good offline review point");
+    REQUIRE(checkpoint.has_value());
+    REQUIRE(p->checkpoints().size() == 1);
+    REQUIRE(p->checkpoints()[0].id == "before-flash");
+    REQUIRE(p->checkpoints()[0].display_name == "Before Flash");
+    REQUIRE(p->checkpoints()[0].note == "Known-good offline review point");
+    REQUIRE(p->checkpoints()[0].byte_size == p->working_rom().size());
+    REQUIRE(p->checkpoints()[0].crc32 == p->working_rom().crc32());
+    REQUIRE(std::filesystem::exists(proj_dir / "checkpoints" / "before-flash.bin"));
+
+    // Editing working afterward must not mutate the checkpoint bytes.
+    REQUIRE(p->working_rom().write_u8(3, 0x5A).has_value());
+    REQUIRE(p->checkpoints()[0].rom.data()[3] == 0xA5);
+
+    auto const duplicate = p->create_checkpoint("before-flash", "Duplicate");
+    REQUIRE_FALSE(duplicate.has_value());
+    REQUIRE(duplicate.error().code() == st::ErrorCode::InvalidArgument);
+}
+
+TEST_CASE("Project checkpoints round-trip through project.toml and report drift",
+          "[project][checkpoint][persist]") {
+    TempDir td;
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const rom_path = td.path / "stock.bin";
+    write_bytes(rom_path, make_rom_bytes());
+    auto const proj_dir = td.path / "checkpoint-roundtrip.stune";
+
+    {
+        auto p = st::Project::create(proj_dir, rom_path, pack_dir, "roundtrip");
+        REQUIRE(p.has_value());
+        REQUIRE(p->create_checkpoint("baseline", "Baseline").has_value());
+    }
+
+    auto reopened = st::Project::open(proj_dir);
+    REQUIRE(reopened.has_value());
+    REQUIRE(reopened->checkpoints().size() == 1);
+    REQUIRE(reopened->checkpoints()[0].id == "baseline");
+    REQUIRE(reopened->checkpoints()[0].display_name == "Baseline");
+    REQUIRE(reopened->checkpoints()[0].rom.size() == make_rom_bytes().size());
+    REQUIRE(reopened->checkpoint_warnings().empty());
+
+    // A checkpoint file is user-visible evidence, so a stale manifest must
+    // be called out rather than silently treated as trusted metadata.
+    write_bytes(proj_dir / "checkpoints" / "baseline.bin", std::vector<std::uint8_t>(8, 0xCC));
+    auto drifted = st::Project::open(proj_dir);
+    REQUIRE(drifted.has_value());
+    REQUIRE(drifted->checkpoints().size() == 1);
+    REQUIRE(drifted->checkpoints()[0].byte_size == 8);
+    REQUIRE_FALSE(drifted->checkpoint_warnings().empty());
+}
+
+TEST_CASE("Project checkpoints reject unsafe ids", "[project][checkpoint]") {
+    TempDir td;
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const rom_path = td.path / "stock.bin";
+    write_bytes(rom_path, make_rom_bytes());
+    auto p = st::Project::create(td.path / "invalid-checkpoints.stune", rom_path, pack_dir,
+                                 "invalid");
+    REQUIRE(p.has_value());
+
+    for (auto const *id : {"", "../escape", "nested/name", ".", "-leading"}) {
+        auto const result = p->create_checkpoint(id, "Invalid");
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().code() == st::ErrorCode::InvalidArgument);
+    }
+    REQUIRE(p->checkpoints().empty());
+}
+
+TEST_CASE("Project restore_checkpoint records one reversible byte transaction",
+          "[project][checkpoint][restore]") {
+    TempDir td;
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const rom_path = td.path / "stock.bin";
+    write_bytes(rom_path, make_rom_bytes());
+    auto const proj_dir = td.path / "restore.stune";
+
+    auto p = st::Project::create(proj_dir, rom_path, pack_dir, "restore");
+    REQUIRE(p.has_value());
+    REQUIRE(p->working_rom().write_u8(3, 0xA5).has_value());
+    REQUIRE(p->create_checkpoint("baseline", "Baseline").has_value());
+    REQUIRE(p->working_rom().write_u8(3, 0x5A).has_value());
+    REQUIRE(p->history().size() == 0);
+
+    REQUIRE(p->restore_checkpoint("baseline").has_value());
+    REQUIRE(p->working_rom().data()[3] == 0xA5);
+    REQUIRE(p->history().size() == 1);
+    REQUIRE(p->history().records()[0].description == "Restore checkpoint: Baseline");
+
+    auto reopened = st::Project::open(proj_dir);
+    REQUIRE(reopened.has_value());
+    REQUIRE(reopened->working_rom().data()[3] == 0xA5);
+    REQUIRE(reopened->history().size() == 1);
+    auto const *restored_edit = reopened->history().records()[0].as_byte();
+    REQUIRE(restored_edit != nullptr);
+    if (restored_edit != nullptr) {
+        REQUIRE(restored_edit->changes.size() == 1);
+    }
+
+    REQUIRE(p->restore_checkpoint("does-not-exist").error().code() ==
+            st::ErrorCode::InvalidArgument);
+}
+
+// ---------------------------------------------------------------------------
+// Edit -> undo/redo -> save -> reopen invariants (task 47 §ROM-editing #6).
+// History is a record-keeper: undo()/redo() only move the cursor, the caller
+// owns the ROM mutation. These tests drive a non-trivial cursor position
+// (partial undo, then a redo) before save to prove the persisted bytes match
+// the persisted history cursor on reopen, and that per-ROM histories persist
+// independently.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Project edit/undo/redo/save/reopen preserves bytes AND history cursor",
+          "[project][history][roundtrip]") {
+    TempDir tmp;
+    auto const proj_dir = tmp.path / "proj";
+    auto const rom_path = tmp.path / "rom.bin";
+    auto const pack_dir = make_pack(tmp.path / "pack");
+    write_bytes(rom_path, make_rom_bytes());
+
+    auto p = st::Project::create(proj_dir, rom_path, pack_dir, "invariants");
+    REQUIRE(p.has_value());
+
+    // Eight independent single-byte edits at distinct addresses; `before` is
+    // always 0xFF (fresh ROM, non-overlapping addresses).
+    constexpr std::size_t kBase = 10;
+    constexpr std::size_t kEdits = 8;
+    for (std::size_t i = 0; i < kEdits; ++i) {
+        auto const addr = kBase + i;
+        auto const after = static_cast<std::uint8_t>(0x10 + i);
+        REQUIRE(p->working_rom().write_u8(addr, after).has_value());
+        p->history().record(st::edit::Edit::bytes(
+            {{addr, 0xFF, after}}, "set byte " + std::to_string(addr)));
+    }
+    REQUIRE(p->history().cursor() == kEdits);
+
+    // Mirror the GUI's undo/redo ROM mutation around the cursor moves.
+    auto revert = [&](st::edit::Edit const *e) {
+        REQUIRE(e != nullptr);
+        auto const *be = e->as_byte();
+        REQUIRE(be != nullptr);
+        for (auto const &c : be->changes) {
+            REQUIRE(p->working_rom().write_u8(c.address, c.before).has_value());
+        }
+    };
+    auto reapply = [&](st::edit::Edit const *e) {
+        REQUIRE(e != nullptr);
+        auto const *be = e->as_byte();
+        REQUIRE(be != nullptr);
+        for (auto const &c : be->changes) {
+            REQUIRE(p->working_rom().write_u8(c.address, c.after).has_value());
+        }
+    };
+
+    // Undo three, redo one -> edits 0..5 applied, 6 and 7 reverted, cursor 6.
+    for (int i = 0; i < 3; ++i) {
+        revert(p->history().undo());
+    }
+    REQUIRE(p->history().cursor() == kEdits - 3);
+    reapply(p->history().redo());
+    REQUIRE(p->history().cursor() == kEdits - 2);
+
+    REQUIRE(p->save_all().has_value());
+
+    auto reopened = st::Project::open(proj_dir);
+    REQUIRE(reopened.has_value());
+
+    auto const &bytes = reopened->working_rom().data();
+    for (std::size_t i = 0; i < kEdits; ++i) {
+        auto const addr = kBase + i;
+        if (i <= 5) {
+            REQUIRE(bytes[addr] == static_cast<std::uint8_t>(0x10 + i));
+        } else {
+            REQUIRE(bytes[addr] == 0xFF);
+        }
+    }
+    REQUIRE(reopened->history().records().size() == kEdits);
+    REQUIRE(reopened->history().cursor() == kEdits - 2);
+    REQUIRE(reopened->history().can_undo());
+    REQUIRE(reopened->history().can_redo());
+}
+
+TEST_CASE("Per-ROM edit histories persist independently across save/reopen",
+          "[project][history][multi-rom]") {
+    TempDir tmp;
+    auto const proj_dir = tmp.path / "proj";
+    auto const rom_path = tmp.path / "rom.bin";
+    auto const pack_dir = make_pack(tmp.path / "pack");
+    write_bytes(rom_path, make_rom_bytes());
+
+    auto p = st::Project::create(proj_dir, rom_path, pack_dir, "multi");
+    REQUIRE(p.has_value());
+
+    // Two edits on the built-in working slot.
+    REQUIRE(p->working_rom().write_u8(10, 0xA1).has_value());
+    p->history().record(st::edit::Edit::bytes({{10, 0xFF, 0xA1}}, "w1"));
+    REQUIRE(p->working_rom().write_u8(11, 0xA2).has_value());
+    p->history().record(st::edit::Edit::bytes({{11, 0xFF, 0xA2}}, "w2"));
+
+    // Register a second ROM and edit it through the active-slot flow.
+    st::Project::AdditionalRom extra;
+    extra.id = "tune-b";
+    extra.display_name = "Tune B";
+    extra.path_rel = "tune-b.bin";
+    extra.rom = st::Rom::from_bytes(make_rom_bytes());
+    REQUIRE(p->add_additional_rom(std::move(extra)).has_value());
+    REQUIRE(p->set_active_rom_id("tune-b").has_value());
+
+    auto *active = p->active_rom_mut();
+    REQUIRE(active != nullptr);
+    REQUIRE(active->write_u8(20, 0xB9).has_value());
+    p->active_history().record(st::edit::Edit::bytes({{20, 0xFF, 0xB9}}, "b1"));
+
+    REQUIRE(p->save_all().has_value());
+
+    auto reopened = st::Project::open(proj_dir);
+    REQUIRE(reopened.has_value());
+
+    // Working history and bytes untouched by the additional ROM's edits.
+    REQUIRE(reopened->history().records().size() == 2);
+    REQUIRE(reopened->working_rom().data()[10] == 0xA1);
+    REQUIRE(reopened->working_rom().data()[11] == 0xA2);
+
+    // The additional ROM carries exactly its own single edit and byte.
+    auto const &extras = reopened->additional_roms();
+    REQUIRE(extras.size() == 1);
+    REQUIRE(extras[0].id == "tune-b");
+    REQUIRE(extras[0].history.records().size() == 1);
+    REQUIRE(extras[0].rom.data()[20] == 0xB9);
+    // The working edits did not leak into the additional ROM's bytes.
+    REQUIRE(extras[0].rom.data()[10] == 0xFF);
+}
+
+// ---------------------------------------------------------------------------
+// Table bulk/range/interpolate/smooth ops through save/reopen/diff round trips
+// (task 47 §ROM-editing #5). Each op is applied to a table read from the
+// working ROM, written back via write_table_values, saved, and re-read from a
+// reopened project. A generic assertion proves the reopened table equals the
+// op's result quantized to the table's uint8 storage (clamp + round half away
+// from zero) — the same contract write_typed enforces.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+std::filesystem::path make_table_pack(std::filesystem::path const &dir) {
+    write_text(dir / "pack.toml", R"toml(
+[pack]
+schema_version = 1
+id             = "table-test-pack"
+endianness     = "big"
+rom_size_bytes = 1024
+
+[[identification]]
+name        = "AS80U fixture"
+cid_address = 0
+cid_length  = 5
+cid_match   = "AS80U"
+
+[[scaling]]
+id        = "axis_x1"
+formula   = "linear"
+factor    = 1.0
+data_type = "uint16_be"
+
+[[scaling]]
+id        = "cal_x1"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+data_type = "uint8"
+
+[[axis]]
+id        = "rpm_axis"
+name      = "RPM"
+type      = "static"
+address   = 0x40
+length    = 4
+data_type = "uint16_be"
+scaling   = "axis_x1"
+
+[[axis]]
+id        = "load_axis"
+name      = "Load"
+type      = "static"
+address   = 0x50
+length    = 3
+data_type = "uint16_be"
+scaling   = "axis_x1"
+
+[[table]]
+id          = "cal_table"
+name        = "Cal Table"
+category    = "test"
+dimensions  = 2
+address     = 0x200
+data_type   = "uint8"
+scaling     = "cal_x1"
+axis_x      = "rpm_axis"
+axis_y      = "load_axis"
+)toml");
+    return dir;
+}
+
+// 1 KB ROM: CID at 0, a 4-entry RPM axis at 0x40, a 3-entry load axis at 0x50,
+// and a 3-row x 4-col uint8 cal table at 0x200 (row-major y then x).
+std::vector<std::uint8_t> make_table_rom_bytes() {
+    std::vector<std::uint8_t> b(1024, 0x00);
+    b[0] = 'A';
+    b[1] = 'S';
+    b[2] = '8';
+    b[3] = '0';
+    b[4] = 'U';
+    auto put_u16be = [&](std::size_t off, std::uint16_t v) {
+        b[off] = static_cast<std::uint8_t>(v >> 8);
+        b[off + 1] = static_cast<std::uint8_t>(v & 0xFF);
+    };
+    put_u16be(0x40, 1000);
+    put_u16be(0x42, 2000);
+    put_u16be(0x44, 3000);
+    put_u16be(0x46, 4000);
+    put_u16be(0x50, 1000);
+    put_u16be(0x52, 2000);
+    put_u16be(0x54, 3000);
+    std::uint8_t const grid[12] = {10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120};
+    for (std::size_t i = 0; i < 12; ++i) {
+        b[0x200 + i] = grid[i];
+    }
+    return b;
+}
+
+} // namespace
+
+TEST_CASE("Table ops round-trip through ROM save/reopen with uint8 quantization",
+          "[project][table][roundtrip]") {
+    TempDir tmp;
+    auto const proj_dir = tmp.path / "proj";
+    auto const rom_path = tmp.path / "rom.bin";
+    auto const pack_dir = make_table_pack(tmp.path / "pack");
+    write_bytes(rom_path, make_table_rom_bytes());
+
+    auto p = st::Project::create(proj_dir, rom_path, pack_dir, "table-roundtrip");
+    REQUIRE(p.has_value());
+    auto const *table = p->definition().find_table("cal_table");
+    REQUIRE(table != nullptr);
+
+    auto read_grid = [&](st::Project const &pr) {
+        auto const *t = pr.definition().find_table("cal_table");
+        REQUIRE(t != nullptr);
+        auto td = pr.definition().read_table_values(pr.working_rom(), *t);
+        REQUIRE(td.has_value());
+        return td.value();
+    };
+
+    // Confirm the fixture read matches the bytes we wrote (identity scaling).
+    {
+        auto const td = read_grid(*p);
+        REQUIRE(td.values.size() == 3);
+        REQUIRE(td.values[0].size() == 4);
+        REQUIRE(td.values[0][0] == 10.0);
+        REQUIRE(td.values[2][3] == 120.0);
+    }
+
+    // Write an already-quantized grid, save, reopen, and assert every cell
+    // survived exactly (clamp + round half away from zero).
+    auto assert_roundtrip = [&](st::Definition::TableData const &applied) {
+        REQUIRE(p->definition()
+                    .write_table_values(p->working_rom(), *table, applied)
+                    .has_value());
+        REQUIRE(p->save_all().has_value());
+        auto reopened = st::Project::open(proj_dir);
+        REQUIRE(reopened.has_value());
+        auto const td2 = read_grid(*reopened);
+        REQUIRE(td2.values.size() == applied.values.size());
+        for (std::size_t r = 0; r < applied.values.size(); ++r) {
+            REQUIRE(td2.values[r].size() == applied.values[r].size());
+            for (std::size_t c = 0; c < applied.values[r].size(); ++c) {
+                double const v = applied.values[r][c];
+                double rounded = v >= 0.0 ? v + 0.5 : v - 0.5;
+                rounded = static_cast<double>(static_cast<long long>(rounded));
+                double const expected = std::clamp(rounded, 0.0, 255.0);
+                REQUIRE(td2.values[r][c] == Catch::Approx(expected));
+            }
+        }
+        return td2;
+    };
+
+    SECTION("CSV bulk edit lands and persists") {
+        st::EditCsvParseOptions opts;
+        opts.expected_table_id = "cal_table";
+        opts.table_rows = 3;
+        opts.table_cols = 4;
+        auto csv = st::parse_edit_csv("# table = \"cal_table\"\n0,0,200\n2,3,17\n", opts);
+        REQUIRE(csv.has_value());
+        REQUIRE(csv->cells.size() == 2);
+
+        auto td = read_grid(*p);
+        for (auto const &cell : csv->cells) {
+            td.values[cell.row][cell.col] = cell.value;
+        }
+        auto const td2 = assert_roundtrip(td);
+        REQUIRE(td2.values[0][0] == Catch::Approx(200.0));
+        REQUIRE(td2.values[2][3] == Catch::Approx(17.0));
+        REQUIRE(td2.values[1][1] == Catch::Approx(60.0)); // untouched
+    }
+
+    SECTION("percent-scale range op persists") {
+        auto td = read_grid(*p);
+        REQUIRE(st::edit::percent_scale_cells(td, st::edit::whole_table(td), 10.0).has_value());
+        auto const td2 = assert_roundtrip(td);
+        REQUIRE(td2.values[0][0] == Catch::Approx(11.0));   // 10 * 1.1
+        REQUIRE(td2.values[2][3] == Catch::Approx(132.0));  // 120 * 1.1
+    }
+
+    SECTION("interpolate op persists") {
+        auto td = read_grid(*p);
+        REQUIRE(st::edit::interpolate_cells(td, st::edit::whole_table(td)).has_value());
+        // Corners are the interpolation anchors and must be unchanged.
+        auto const td2 = assert_roundtrip(td);
+        REQUIRE(td2.values[0][0] == Catch::Approx(10.0));
+        REQUIRE(td2.values[0][3] == Catch::Approx(40.0));
+        REQUIRE(td2.values[2][0] == Catch::Approx(90.0));
+        REQUIRE(td2.values[2][3] == Catch::Approx(120.0));
+    }
+
+    SECTION("smooth op persists") {
+        auto td = read_grid(*p);
+        REQUIRE(st::edit::smooth_cells(td, st::edit::whole_table(td), 1).has_value());
+        assert_roundtrip(td);
+    }
 }

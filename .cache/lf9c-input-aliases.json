@@ -1,0 +1,31 @@
+{
+  "schema": "subuwutuner.rom-pointer-aliases.v1",
+  "targets": {
+    "0xFFF890E6": {
+      "literal_count": 0,
+      "aliases": []
+    },
+    "0xFFF890F4": {
+      "literal_count": 1,
+      "aliases": [
+        {
+          "literal_address": "0x1E4660",
+          "references": [
+            {
+              "alias": "PTR_DAT_001e4660",
+              "function": "FUN_001e45e8",
+              "address": "0x1E45E8",
+              "file": "decomp_LF9C102P_1C0000.txt",
+              "reference_count": 3,
+              "lines": [
+                23223,
+                23225,
+                23229
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

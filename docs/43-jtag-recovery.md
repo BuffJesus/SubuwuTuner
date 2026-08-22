@@ -1,6 +1,32 @@
 # JTAG Recovery Procedure for Bricked Subaru ECUs (LF79xxxP family)
 
-> **Status**: Operational reference for when E2-Lite hardware is on hand. Compiled from analyst round-58 findings and Renesas SH-2A documentation.
+> **Platform warning (2026-08-02):** This note is an operational reference
+> for the SH-2A/SH7058 assumptions under which it was drafted. Do **not**
+> infer that its Renesas E2-Lite target selection, 14-pin pinout, or live-RAM
+> procedure applies to every 2015–2021 Hitachi/Renesas SH72543 ECU. Confirm
+> the exact MCU marking, ECU board revision, debug/boot interface, and
+> vendor-supported tool before connecting hardware. See
+> [VA_RECOVERY_RESEARCH.md](../../findings/decompile/VA_RECOVERY_RESEARCH.md).
+
+> **Status**: Unvalidated operational reference. The original E2-Lite hardware
+> recommendation is withdrawn for SH72543-style VA ECUs. See
+> [49-diy-sh2a-recovery-probe.md](49-diy-sh2a-recovery-probe.md) for the corrected E200F /
+> E10A / DIY-probe research plan.
+
+> **2026-08-21 correction:** the available E2-Lite/RFP route is now refuted for
+> this SuperH/H-UDI target; do not execute the E2-Lite procedure below. The
+> preferred hardware path is an exact-CID donor. SH72543R SCI boot mode via a
+> supported serial toolchain is an exact-board research candidate only, pending
+> MCU marking, pad mapping, and non-destructive identify/read proof. The steps
+> below remain solely as a record of the retired hypothesis.
+
+> **Hard stop before Step 1:** This document is not a universal SH72543
+> recovery recipe. Do not connect an E2-Lite, apply the 14-pin pinout below,
+> select an RFP target, erase flash, or write the RAM markers unless the exact
+> ECU label/CID, PCB revision, MCU top-mark, debug/boot interface, and
+> tool/vendor target support have been independently confirmed. If any of
+> those are unknown, stop and use a qualified ECU-recovery service or obtain
+> the exact board documentation first.
 
 ## When to use this procedure
 
@@ -15,8 +41,10 @@ These symptoms indicate the boot integrity check (`FUN_00000D6E` at ROM `0xD6E`)
 ## What you need
 
 ### Hardware
-- **Renesas E2 emulator Lite** (e.g., Digi-Key part `RTE0T00020KCE00000R`, ~$60-100)
-- **14-pin Renesas user-interface cable** (often sold separately; the SH-2A uses the standard Renesas 14-pin debug header)
+- **A verified SH-2A H-UDI probe**: historically Renesas E200F or a compatible
+  E10A-USB-class emulator. Exact SH72543 support and used-unit condition must
+  be confirmed before purchase.
+- **Matching H-UDI user-interface cable/adapter** for the confirmed target.
 - **12 V regulated bench PSU** for the ECU (current capability ≥ 1 A; brief peaks higher)
 - ECU bench harness exposing the debug header (most Subaru ECUs require shell disassembly to access the PCB)
 
@@ -36,7 +64,9 @@ These symptoms indicate the boot integrity check (`FUN_00000D6E` at ROM `0xD6E`)
 - Disconnect any other harness connections to the ECU besides power and the JTAG cable. Leaving the CAN bus connected during boot mode operation can cause unpredictable behavior.
 
 ### 2. Identify the debug header on the PCB
-For Subaru engine ECUs based on the SH-2A (Ho7058 / SH7058A family), the 14-pin Renesas debug header pinout is:
+For a confirmed Subaru ECU based on the applicable SH-2A (SH7058/SH7058A)
+family and a confirmed matching Renesas debug header, the 14-pin debug
+header pinout is:
 
 | Pin | Signal | Purpose |
 |---|---|---|
@@ -62,8 +92,11 @@ If the PCB doesn't have a 14-pin header populated, the corresponding test pads u
 2. Plug the 14-pin cable into the debug header.
 3. Connect the E2-Lite to USB.
 4. Apply 12 V to the ECU power input.
-5. Launch RFP, create a new project for "Renesas SH-2A SH72531/Ho7058" (or closest match), select the E2-Lite as the tool.
-6. RFP should establish a JTAG session and report the chip identity. If not, check power and cable seating.
+5. Use the vendor software for the confirmed probe and exact MCU target. Do
+   not select a merely similar target or assume current E2/E2-Lite software
+   supports SH-2A H-UDI.
+6. The probe must establish a debug session and report chip identity before
+   any erase/program operation is considered. If not, stop.
 
 ### 4. Dump current flash state (diagnostic, optional but recommended)
 Before erasing, dump the current flash to a file for forensics. This lets you compare to the reference ROM and confirm exactly which regions drifted (closes loops in the round-58 analysis).
@@ -80,7 +113,13 @@ Before erasing, dump the current flash to a file for forensics. This lets you co
 - This writes 2 MiB byte-for-byte. RFP handles the FCU sequencer internally — we don't need to use the broken `0x3910` path.
 - Verify via RFP's built-in compare; should report no differences.
 
-### 7. (Recommended) Write boot integrity RAM markers
+### 7. (Recommended, only for a confirmed matching firmware/MCU)
+Write boot integrity RAM markers
+
+The addresses and values in this section are firmware-specific evidence, not
+generic SH-2A constants. If the exact CID/firmware family is not confirmed,
+skip this entire section and stop for analyst/vendor review. A wrong live-RAM
+write can create a second failure while diagnosing the first one.
 The boot integrity check (`FUN_00000B88` at ROM `0xB88`) reads RAM markers at `0xFFF82016` and `0xFFF82002`. After a power-cycle these may be undefined. To force a steady-state pass without going through priming:
 - In RFP or e² studio: halt CPU after reset.
 - Live-write `0xFFF82016 = 0x55AA` (u16 BE, byte order: write `55 AA`).

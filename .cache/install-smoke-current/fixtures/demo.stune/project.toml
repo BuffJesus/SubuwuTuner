@@ -1,0 +1,21 @@
+[project]
+schema_version = 1
+display_name   = "Demo (synthetic)"
+created        = "2026-05-12T03:29:40Z"
+notes          = ""
+policy_profile = "motorsport-only"
+active_rom_id  = ""
+
+[project.source_rom]
+path   = "source.bin"
+crc32 = 467298693
+
+[project.working_rom]
+path   = "working.bin"
+crc32 = 467298693
+
+[project.definition]
+path = "../demo-pack"
+
+[security_access]
+handheld_serial = ""

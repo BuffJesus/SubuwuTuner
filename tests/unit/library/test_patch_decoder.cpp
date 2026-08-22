@@ -15,7 +15,7 @@
 namespace {
 
 // Synthetic E2E fixture — verbatim from the patch decoder spec.
-constexpr std::string_view kSyntheticPrivateData =
+[[maybe_unused]] constexpr std::string_view kSyntheticPrivateData =
     "<PrivateData>"
     "<vendorID>SUBUWU_TEST</vendorID>"
     "<vehicleID>SYNTHETIC_E2E_FIXTURE</vehicleID>"

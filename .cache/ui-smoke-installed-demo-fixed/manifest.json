@@ -1,0 +1,70 @@
+﻿{
+    "executable":  "D:\\Subuwu\\code\\.cache\\install-smoke-current\\subuwutuner-gui.exe",
+    "scenario":  "Demo",
+    "project":  "D:\\Subuwu\\code\\.cache\\install-smoke-current\\fixtures\\demo.stune",
+    "requested_window":  "800x600",
+    "pid":  3728,
+    "title":  "Demo (synthetic) — SubuwuTuner",
+    "responding":  true,
+    "stderr_empty":  true,
+    "stdout_bytes":  0,
+    "stderr_bytes":  0,
+    "termination":  "stopped-by-harness",
+    "exit_code":  null,
+    "screenshots":  [
+                        {
+                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke-installed-demo-fixed\\01-tune-workspace.png",
+                            "width":  800,
+                            "height":  600,
+                            "bytes":  61140,
+                            "sampled_colors":  13,
+                            "non_black_ratio":  1,
+                            "sanity_passed":  true
+                        },
+                        {
+                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke-installed-demo-fixed\\02-log-empty-state.png",
+                            "width":  800,
+                            "height":  600,
+                            "bytes":  48528,
+                            "sampled_colors":  6,
+                            "non_black_ratio":  1,
+                            "sanity_passed":  true
+                        },
+                        {
+                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke-installed-demo-fixed\\03-log-sample.png",
+                            "width":  800,
+                            "height":  600,
+                            "bytes":  83325,
+                            "sampled_colors":  12,
+                            "non_black_ratio":  1,
+                            "sanity_passed":  true
+                        },
+                        {
+                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke-installed-demo-fixed\\04-feature-workspace.png",
+                            "width":  800,
+                            "height":  600,
+                            "bytes":  55247,
+                            "sampled_colors":  10,
+                            "non_black_ratio":  1,
+                            "sanity_passed":  true
+                        },
+                        {
+                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke-installed-demo-fixed\\05-command-palette.png",
+                            "width":  800,
+                            "height":  600,
+                            "bytes":  69015,
+                            "sampled_colors":  20,
+                            "non_black_ratio":  1,
+                            "sanity_passed":  true
+                        },
+                        {
+                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke-installed-demo-fixed\\06-command-palette-dismissed.png",
+                            "width":  800,
+                            "height":  600,
+                            "bytes":  55247,
+                            "sampled_colors":  10,
+                            "non_black_ratio":  1,
+                            "sanity_passed":  true
+                        }
+                    ]
+}

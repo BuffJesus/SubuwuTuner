@@ -17,24 +17,22 @@
 //     free if/when we flip on NavEnableKeyboard later; for now arrow
 //     keys are driven explicitly by IsKeyPressed below.
 
-#include "panels/panels.hpp"
+#include "st/policy.hpp"
 
 #include "actions.hpp"
 #include "app_state.hpp"
 #include "modals/modals.hpp" // pack_supports_fa24_swap
+#include "panels/panels.hpp"
 #include "project_io.hpp"
 #include "theme.hpp"
 #include "widgets/widgets.hpp"
-
-#include "st/policy.hpp"
-
-#include <imgui.h>
 
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <imgui.h>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -72,6 +70,7 @@ enum class PaletteCommandKind : std::uint8_t {
     ToggleEbcs,
     ToggleFeatures,
     ToggleGaugeCluster,
+    ToggleLogExplorer,
     ToggleCompare,
     ToggleAudit,
     ToggleAp3Browser,
@@ -93,9 +92,9 @@ enum class PaletteCommandKind : std::uint8_t {
 struct PaletteCommand {
     PaletteCommandKind kind;
     std::string label;
-    std::string hint;       // dimmed subtitle; usually a shortcut or category
-    char const *category;   // group label for the chip on the right
-    std::string payload;    // path for OpenRecent, id for OpenTable; empty otherwise
+    std::string hint;     // dimmed subtitle; usually a shortcut or category
+    char const *category; // group label for the chip on the right
+    std::string payload;  // path for OpenRecent, id for OpenTable; empty otherwise
 };
 
 // Build the command list. Recomputed every frame the palette is open —
@@ -116,8 +115,8 @@ std::vector<PaletteCommand> build_palette_commands(AppState const &state) {
     bool const can_redo = has_project && state.project->active_history().can_redo();
     bool const can_csv = has_project && !state.selected_table_id.empty();
 
-    auto push = [&](PaletteCommandKind k, char const *label, char const *hint,
-                    char const *category, std::string payload = {}) {
+    auto push = [&](PaletteCommandKind k, char const *label, char const *hint, char const *category,
+                    std::string payload = {}) {
         out.push_back({k, label, hint, category, std::move(payload)});
     };
 
@@ -128,12 +127,10 @@ std::vector<PaletteCommand> build_palette_commands(AppState const &state) {
         push(PaletteCommandKind::SaveProject, "Save project", "Ctrl+S", "File");
         push(PaletteCommandKind::CloseProject, "Close project", "", "File");
         if (can_csv) {
-            push(PaletteCommandKind::ImportCsv, "Import CSV into current table…", "",
+            push(PaletteCommandKind::ImportCsv, "Import CSV into current table…", "", "File");
+            push(PaletteCommandKind::ExportCsv, "Export current table as CSV…", "", "File");
+            push(PaletteCommandKind::ExportCsvDiff, "Export current table edits as CSV…", "",
                  "File");
-            push(PaletteCommandKind::ExportCsv, "Export current table as CSV…", "",
-                 "File");
-            push(PaletteCommandKind::ExportCsvDiff,
-                 "Export current table edits as CSV…", "", "File");
         }
     }
     push(PaletteCommandKind::Quit, "Quit", "Ctrl+Q", "File");
@@ -144,18 +141,16 @@ std::vector<PaletteCommand> build_palette_commands(AppState const &state) {
     if (has_project) {
         push(PaletteCommandKind::Undo, "Undo", can_undo ? "Ctrl+Z" : "Ctrl+Z (nothing to undo)",
              "Edit");
-        push(PaletteCommandKind::Redo, "Redo", can_redo ? "Ctrl+Shift+Z" : "Ctrl+Shift+Z (nothing to redo)",
-             "Edit");
+        push(PaletteCommandKind::Redo, "Redo",
+             can_redo ? "Ctrl+Shift+Z" : "Ctrl+Shift+Z (nothing to redo)", "Edit");
         if (has_selection) {
             push(PaletteCommandKind::Copy, "Copy selection", "Ctrl+C", "Edit");
             push(PaletteCommandKind::Paste, "Paste at cursor", "Ctrl+V", "Edit");
-            push(PaletteCommandKind::ResetToSource, "Reset selection to source", "",
-                 "Edit");
+            push(PaletteCommandKind::ResetToSource, "Reset selection to source", "", "Edit");
         }
-        push(PaletteCommandKind::AutotuneMaf, "Auto-Tune: MAF…",
-             "From a CSV datalog", "Edit");
-        push(PaletteCommandKind::AutotuneKp, "Auto-Tune: Knock Pull…",
-             "From a CSV datalog", "Edit");
+        push(PaletteCommandKind::AutotuneMaf, "Auto-Tune: MAF…", "From a CSV datalog", "Edit");
+        push(PaletteCommandKind::AutotuneKp, "Auto-Tune: Knock Pull…", "From a CSV datalog",
+             "Edit");
     }
 
     // Tools — always available; their modals handle the no-project case.
@@ -167,8 +162,8 @@ std::vector<PaletteCommand> build_palette_commands(AppState const &state) {
     // workflows on every demo project. Future workflows (Stage1→2
     // step, E85 conversion) follow the same shape.
     if (has_project && pack_supports_fa24_swap(state)) {
-        push(PaletteCommandKind::FA24Swap, "FA24 swap (VA WRX)\xE2\x80\xA6",
-             "Guided 3-step recipe", "Workflows");
+        push(PaletteCommandKind::FA24Swap, "FA24 swap (VA WRX)\xE2\x80\xA6", "Guided 3-step recipe",
+             "Workflows");
     }
 
     // View — table view modes only meaningful with a project loaded.
@@ -180,24 +175,20 @@ std::vector<PaletteCommand> build_palette_commands(AppState const &state) {
         bool const is_working_active = state.viewing_working_rom();
         bool const is_source_active = state.active_rom_id == "source";
         if (!is_working_active) {
-            push(PaletteCommandKind::SwitchActiveRom,
-                 "View: Switch to Working ROM", "Active ROM", "View",
-                 "working");
+            push(PaletteCommandKind::SwitchActiveRom, "View: Switch to Working ROM", "Active ROM",
+                 "View", "working");
         }
         if (!is_source_active) {
-            push(PaletteCommandKind::SwitchActiveRom,
-                 "View: Switch to Source ROM (read-only)", "Active ROM", "View",
-                 "source");
+            push(PaletteCommandKind::SwitchActiveRom, "View: Switch to Source ROM (read-only)",
+                 "Active ROM", "View", "source");
         }
         for (auto const &r : state.project->additional_roms()) {
             if (state.active_rom_id == r.id) {
                 continue;
             }
-            std::string const display =
-                r.display_name.empty() ? r.id : r.display_name;
+            std::string const display = r.display_name.empty() ? r.id : r.display_name;
             std::string label = "View: Switch to " + display;
-            push(PaletteCommandKind::SwitchActiveRom, label.c_str(), "Active ROM",
-                 "View", r.id);
+            push(PaletteCommandKind::SwitchActiveRom, label.c_str(), "Active ROM", "View", r.id);
         }
     }
     // Panel toggles — useful even without a project (panels render their
@@ -208,42 +199,39 @@ std::vector<PaletteCommand> build_palette_commands(AppState const &state) {
     };
     push(PaletteCommandKind::ToggleStats,
          toggle_label(state.show_stats_panel, "Stats panel").c_str(), "", "View");
-    push(PaletteCommandKind::ToggleDtcs,
-         toggle_label(state.show_dtcs_panel, "DTCs panel").c_str(), "", "View");
+    push(PaletteCommandKind::ToggleDtcs, toggle_label(state.show_dtcs_panel, "DTCs panel").c_str(),
+         "", "View");
     push(PaletteCommandKind::ToggleHistory,
          toggle_label(state.show_history_panel, "History panel").c_str(), "", "View");
     push(PaletteCommandKind::ToggleKnock,
-         toggle_label(state.show_knock_dashboard_panel, "Knock Dashboard").c_str(),
-         "Datalog", "View");
+         toggle_label(state.show_knock_dashboard_panel, "Knock Dashboard").c_str(), "Datalog",
+         "View");
     push(PaletteCommandKind::ToggleAdaptive,
-         toggle_label(state.show_adaptive_history_panel, "Adaptive History").c_str(),
-         "Datalog", "View");
+         toggle_label(state.show_adaptive_history_panel, "Adaptive History").c_str(), "Datalog",
+         "View");
     push(PaletteCommandKind::ToggleColdstart,
-         toggle_label(state.show_coldstart_panel, "Cold-Start Analysis").c_str(),
-         "Datalog", "View");
+         toggle_label(state.show_coldstart_panel, "Cold-Start Analysis").c_str(), "Datalog",
+         "View");
     push(PaletteCommandKind::ToggleEbcs,
-         toggle_label(state.show_ebcs_panel, "EBCS PID Assistant").c_str(),
-         "Datalog", "View");
+         toggle_label(state.show_ebcs_panel, "EBCS PID Assistant").c_str(), "Datalog", "View");
     push(PaletteCommandKind::ToggleFeatures,
-         toggle_label(state.show_features_designer, "Custom Features Designer").c_str(),
-         "Features", "View");
+         toggle_label(state.show_features_designer, "Custom Features Designer").c_str(), "Features",
+         "View");
     push(PaletteCommandKind::ToggleGaugeCluster,
-         toggle_label(state.show_gauge_cluster_panel, "Gauge Cluster").c_str(),
-         "Datalog", "View");
+         toggle_label(state.show_gauge_cluster_panel, "Gauge Cluster").c_str(), "Datalog", "View");
+    push(PaletteCommandKind::ToggleLogExplorer,
+         toggle_label(state.show_log_explorer_panel, "Log Explorer").c_str(), "Datalog", "View");
     push(PaletteCommandKind::ToggleCompare,
-         toggle_label(state.show_compare_panel, "Compare ROMs").c_str(),
-         "Diff", "View");
-    push(PaletteCommandKind::ToggleAudit,
-         toggle_label(state.show_audit_panel, "Audit log").c_str(),
+         toggle_label(state.show_compare_panel, "Compare ROMs").c_str(), "Diff", "View");
+    push(PaletteCommandKind::ToggleAudit, toggle_label(state.show_audit_panel, "Audit log").c_str(),
          "Project", "View");
 #ifdef ST_HAVE_AP_WORKFLOW
     push(PaletteCommandKind::ToggleAp3Browser,
-         toggle_label(state.show_ap3_browser_panel, "AccessPort Browser").c_str(),
-         "Hardware", "View");
+         toggle_label(state.show_ap3_browser_panel, "AccessPort Browser").c_str(), "Hardware",
+         "View");
 #endif
     push(PaletteCommandKind::ToggleLibrary,
-         toggle_label(state.show_library_panel, "Tune Library").c_str(),
-         "Library", "View");
+         toggle_label(state.show_library_panel, "Tune Library").c_str(), "Library", "View");
     push(PaletteCommandKind::ResetLayout, "Reset window layout",
          "Rebuild the default dock arrangement", "View");
     // Theme — show the inactive one. No point listing "Theme: Dark" when
@@ -256,14 +244,13 @@ std::vector<PaletteCommand> build_palette_commands(AppState const &state) {
 
     // Tools — surfaces that aren't panels but still high-traffic.
     if (has_project) {
-        push(PaletteCommandKind::Flash, "Flash…",
-             "Preview the flash plan + policy gate", "Tools");
+        push(PaletteCommandKind::Flash, "Flash…", "Preview the flash plan + policy gate", "Tools");
     }
 
     // Help.
     push(PaletteCommandKind::Shortcuts, "Keyboard shortcuts…", "", "Help");
-    push(PaletteCommandKind::HelpTopics, "Topics & Glossary…",
-         "Open the in-app help browser", "Help");
+    push(PaletteCommandKind::HelpTopics, "Topics & Glossary…", "Open the in-app help browser",
+         "Help");
     push(PaletteCommandKind::WelcomeWizard, "Run welcome wizard…",
          "Re-pick jurisdiction / units / theme / demo project", "Help");
     push(PaletteCommandKind::About, "About SubuwuTuner…", "", "Help");
@@ -275,9 +262,8 @@ std::vector<PaletteCommand> build_palette_commands(AppState const &state) {
         auto base = r.path.filename().string();
         if (base.empty())
             base = r.path.string();
-        push(PaletteCommandKind::OpenRecent,
-             ("Open: " + base).c_str(), r.path.string().c_str(), "Recent",
-             r.path.string());
+        push(PaletteCommandKind::OpenRecent, ("Open: " + base).c_str(), r.path.string().c_str(),
+             "Recent", r.path.string());
     }
 
     // Tables — every table in the loaded pack. Label uses the human
@@ -287,11 +273,11 @@ std::vector<PaletteCommand> build_palette_commands(AppState const &state) {
         for (auto const &t : def.tables()) {
             char hint_buf[160];
             char const *cat = t.category.empty() ? "Other" : t.category.c_str();
-            std::snprintf(hint_buf, sizeof hint_buf, "%s · 0x%08zX · %s",
-                          t.id.c_str(), t.address, cat);
+            std::snprintf(hint_buf, sizeof hint_buf, "%s · 0x%08zX · %s", t.id.c_str(), t.address,
+                          cat);
             char const *label = t.name.empty() ? t.id.c_str() : t.name.c_str();
-            push(PaletteCommandKind::OpenTable,
-                 ("Go to: " + std::string{label}).c_str(), hint_buf, "Table", t.id);
+            push(PaletteCommandKind::OpenTable, ("Go to: " + std::string{label}).c_str(), hint_buf,
+                 "Table", t.id);
         }
     }
 
@@ -425,6 +411,9 @@ void dispatch_palette_command(AppState &state, PaletteCommand const &cmd) {
     case PaletteCommandKind::ToggleGaugeCluster:
         state.show_gauge_cluster_panel = !state.show_gauge_cluster_panel;
         break;
+    case PaletteCommandKind::ToggleLogExplorer:
+        state.show_log_explorer_panel = !state.show_log_explorer_panel;
+        break;
     case PaletteCommandKind::ToggleCompare:
         state.show_compare_panel = !state.show_compare_panel;
         break;
@@ -469,8 +458,7 @@ void dispatch_palette_command(AppState &state, PaletteCommand const &cmd) {
         state.flash_reason[0] = '\0';
         break;
     case PaletteCommandKind::OpenRecent:
-        request_action(state, ConfirmAction::OpenRecent,
-                       std::filesystem::path{cmd.payload});
+        request_action(state, ConfirmAction::OpenRecent, std::filesystem::path{cmd.payload});
         break;
     case PaletteCommandKind::OpenTable:
         if (state.project.has_value()) {
@@ -578,9 +566,9 @@ void render_command_palette(AppState &state) {
             (state.command_palette_selected + 1) % static_cast<int>(matches.size());
     }
     if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, /*repeat=*/true)) {
-        state.command_palette_selected = (state.command_palette_selected - 1 +
-                                          static_cast<int>(matches.size())) %
-                                         static_cast<int>(matches.size());
+        state.command_palette_selected =
+            (state.command_palette_selected - 1 + static_cast<int>(matches.size())) %
+            static_cast<int>(matches.size());
     }
 
     // Enter executes whatever's highlighted. Capture and dispatch after
@@ -598,8 +586,7 @@ void render_command_palette(AppState &state) {
     // flags both zero: we drive selection by index from arrow-key
     // pressed events above rather than ImGui's nav system.
     float const footer_h = ImGui::GetFrameHeightWithSpacing();
-    if (ImGui::BeginChild("##palette_results",
-                          ImVec2(0.0f, -footer_h - kSpaceS), 0, 0)) {
+    if (ImGui::BeginChild("##palette_results", ImVec2(0.0f, -footer_h - kSpaceS), 0, 0)) {
         for (std::size_t i = 0; i < matches.size(); ++i) {
             auto const &cmd = all[matches[i]];
             bool const is_sel = (static_cast<int>(i) == state.command_palette_selected);
@@ -620,8 +607,8 @@ void render_command_palette(AppState &state) {
             // so it sits quietly beside the row text.
             if (cmd.category != nullptr && cmd.category[0] != '\0') {
                 float const chip_w = ImGui::CalcTextSize(cmd.category).x + 16.0f;
-                float const right_x =
-                    ImGui::GetWindowContentRegionMax().x - chip_w - ImGui::GetStyle().FramePadding.x;
+                float const right_x = ImGui::GetWindowContentRegionMax().x - chip_w -
+                                      ImGui::GetStyle().FramePadding.x;
                 ImGui::SameLine();
                 ImGui::SetCursorPosX(right_x);
                 chip(cmd.category, chip_fg_muted(), chip_bg_muted());

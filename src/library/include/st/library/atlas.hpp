@@ -159,6 +159,11 @@ public:
     [[nodiscard]] AtlasTable const *find_table(std::string_view id) const noexcept;
     [[nodiscard]] AtlasTuner const *find_tuner(std::string_view id) const noexcept;
     [[nodiscard]] AtlasSafetyPair const *find_safety_pair(std::string_view id) const noexcept;
+    // Safety relationships whose lhs/rhs regex patterns match a table's
+    // display name. Invalid analyst-authored regexes are ignored so metadata
+    // can never make the application unusable.
+    [[nodiscard]] std::vector<AtlasSafetyPair const *>
+    safety_pairs_for_table(std::string_view display_name) const;
     [[nodiscard]] AtlasAnchor const *find_anchor(std::string_view id) const noexcept;
     [[nodiscard]] AtlasCidCoverage const *find_cid_coverage(std::string_view cid) const noexcept;
 

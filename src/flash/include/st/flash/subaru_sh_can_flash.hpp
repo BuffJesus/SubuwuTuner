@@ -272,7 +272,7 @@ public:
                                         ProgressFn on_progress = nullptr);
 
 private:
-    st::transport::ITransport *channel_;
+    [[maybe_unused]] st::transport::ITransport *channel_;
     SubaruEcuFlashParams params_;
 };
 

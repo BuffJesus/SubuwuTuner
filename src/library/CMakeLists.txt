@@ -9,6 +9,8 @@ add_library(st_library STATIC
     src/tune_annotation.cpp
     src/filename_classifier.cpp
     src/datalog_csv.cpp
+    src/datalog_session.cpp
+    src/guided_tasks.cpp
 )
 
 target_include_directories(st_library

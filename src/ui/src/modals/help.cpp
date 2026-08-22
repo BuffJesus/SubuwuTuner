@@ -204,7 +204,7 @@ void parse_glossary(std::string_view body,
         // start their term with a capital letter or acronym.
         std::string lower = term;
         std::transform(lower.begin(), lower.end(), lower.begin(),
-                       [](unsigned char c) { return std::tolower(c); });
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         if (lower == "term" || lower == "meaning") {
             continue;
         }

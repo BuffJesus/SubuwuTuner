@@ -99,7 +99,9 @@ void render_read_rom_modal(AppState &state) {
             if (loaded.has_value()) {
                 auto hint = loaded->transport_hint;
                 std::transform(hint.begin(), hint.end(), hint.begin(),
-                               [](unsigned char c) { return std::tolower(c); });
+                               [](unsigned char c) {
+                                   return static_cast<char>(std::tolower(c));
+                               });
                 // Order matters — match more specific strings first
                 // (l3 before plain "aftermarket") so the index lands
                 // on the right variant. Deprecated "cobb"/"fehr-active"

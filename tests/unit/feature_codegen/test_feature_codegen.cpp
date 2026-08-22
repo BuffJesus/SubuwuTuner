@@ -137,6 +137,19 @@ TEST_CASE("select_backend is case-insensitive on the platform name", "[feature_c
     REQUIRE(cg::select_backend("Va").has_value());
 }
 
+TEST_CASE("select_backend recognizes canonical dotted Subaru platform ids",
+          "[feature_codegen][select]") {
+    auto va = cg::select_backend("subaru.va.wrx.mt");
+    REQUIRE(va.has_value());
+    CHECK((*va)->arch() == cg::Arch::Sh2a);
+
+    auto vb = cg::select_backend("subaru.vb.wrx.fa24dit");
+    REQUIRE(vb.has_value());
+    CHECK((*vb)->arch() == cg::Arch::Rh850);
+
+    CHECK_FALSE(cg::select_backend("subaru.vanguard").has_value());
+}
+
 TEST_CASE("select_backend refuses an unknown platform", "[feature_codegen][select]") {
     auto b = cg::select_backend("EJ20T");
     REQUIRE_FALSE(b.has_value());

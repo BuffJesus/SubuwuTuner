@@ -1,0 +1,34 @@
+﻿{
+    "executable":  "D:\\Subuwu\\code\\build\\win-mingw\\bin\\subuwutuner-gui.exe",
+    "scenario":  "Readiness",
+    "project":  "D:\\Subuwu\\code\\fixtures\\demo.stune",
+    "requested_window":  "1400x880",
+    "pid":  21916,
+    "title":  "● Demo (synthetic) — SubuwuTuner",
+    "responding":  true,
+    "stderr_empty":  true,
+    "stdout_bytes":  0,
+    "stderr_bytes":  0,
+    "termination":  "stopped-by-harness",
+    "exit_code":  null,
+    "screenshots":  [
+                        {
+                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke\\01-view-menu.png",
+                            "width":  1400,
+                            "height":  880,
+                            "bytes":  137517,
+                            "sampled_colors":  49,
+                            "non_black_ratio":  1,
+                            "sanity_passed":  true
+                        },
+                        {
+                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke\\02-readiness-panel.png",
+                            "width":  1400,
+                            "height":  880,
+                            "bytes":  175008,
+                            "sampled_colors":  67,
+                            "non_black_ratio":  1,
+                            "sanity_passed":  true
+                        }
+                    ]
+}

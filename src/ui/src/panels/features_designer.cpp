@@ -6,9 +6,9 @@
 // backed canvas with pan/zoom; node rendering keyed off the pack's
 // hook + primitive declarations; drag-to-connect with type-checked
 // edges; per-pin defaults via right-click menu; .stmod load/save +
-// clipboard JSON; in-canvas compile preview against the selected
-// backend (sh2a / rh850). Still preview — no auto-layout, no undo
-// through st::edit::History yet (Ctrl+Z scope is per-canvas).
+// clipboard JSON. Backend compilation exists in the feature_codegen library,
+// but is not exposed on this canvas yet. Still preview — no auto-layout or
+// graph undo/redo yet.
 
 #include "panels/panels.hpp"
 
@@ -17,6 +17,7 @@
 
 #include "st/defs.hpp"
 #include "st/feature.hpp"
+#include "st/feature_codegen.hpp"
 
 #include <imgui.h>
 #include <nfd.hpp>
@@ -29,9 +30,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
-#include <fstream>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -39,6 +38,77 @@
 #include <vector>
 
 namespace st::ui {
+
+namespace {
+
+bool save_feature_document(AppState &state, std::filesystem::path const &path) {
+    auto const saved = st::feature::save_file(state.features_graph, path);
+    if (!saved.has_value()) {
+        state.features_wire_error = "save: " + saved.error().to_string();
+        enqueue_toast(state, ToastKind::Danger, state.features_wire_error);
+        return false;
+    }
+    state.features_wire_error.clear();
+    state.features_document_path = path;
+    state.features_document_dirty = false;
+    enqueue_toast(state, ToastKind::Success,
+                  "Feature graph saved: " + path.filename().string());
+    return true;
+}
+
+void compile_feature_preview(AppState &state) {
+    state.features_compile_error.clear();
+    state.features_compile_arch.clear();
+    state.features_compile_ir.clear();
+    state.features_compile_gate.clear();
+    state.features_compile_graph_toml = st::feature::to_toml(state.features_graph);
+    state.features_compile_instructions = 0;
+    state.features_compile_hooks = 0;
+    state.features_compile_bytes = 0;
+    state.features_compile_ram_bytes = 0;
+
+    if (!state.project.has_value()) {
+        state.features_compile_error = "Open a project to select a definition-backed target.";
+        return;
+    }
+    auto lowered = st::feature::ir::lower(state.features_graph);
+    if (!lowered.has_value()) {
+        state.features_compile_error = "Lowering failed: " + lowered.error().to_string();
+        return;
+    }
+    state.features_compile_instructions = lowered->instructions.size();
+    state.features_compile_ir = st::feature::ir::dump(*lowered);
+
+    auto backend = st::feature::codegen::select_backend(state.project->definition());
+    if (!backend.has_value()) {
+        state.features_compile_error = "Backend selection failed: " + backend.error().to_string();
+        return;
+    }
+    state.features_compile_arch = st::feature::codegen::arch_name((*backend)->arch());
+    auto compiled = (*backend)->compile(*lowered, state.project->definition());
+    if (!compiled.has_value()) {
+        state.features_compile_error = "Compilation failed: " + compiled.error().to_string();
+        return;
+    }
+    state.features_compile_hooks = compiled->hooks.size();
+    for (auto const &hook : compiled->hooks) {
+        state.features_compile_bytes += hook.code.size();
+        for (auto const &claim : hook.ram_claims) {
+            state.features_compile_ram_bytes += claim.size;
+        }
+    }
+    if (compiled->hooks.empty()) {
+        state.features_compile_gate =
+            "No hook patches emitted. Connect the logic output to a writable hook input.";
+    } else {
+        auto const gate = st::feature::codegen::gate_patch(*compiled, state.project->definition());
+        state.features_compile_gate = gate.has_value()
+                                          ? "Address gate passed"
+                                          : "Address gate blocked: " + gate.error().to_string();
+    }
+}
+
+} // namespace
 
 void render_features_designer(AppState &state) {
     if (!state.show_features_designer) {
@@ -60,7 +130,7 @@ void render_features_designer(AppState &state) {
     // toolbar so the canvas below stays uncluttered.
     preview_pill();
     ImGui::SameLine();
-    text_subtle("Node graph + SH-2A codegen working; flash wire-up lands in Phase 5.");
+    text_subtle("Node graph editing, validation, and safe compile preview.");
     ImGui::Separator();
 
     // Esc / right-click cancel an in-progress wire. The non-obvious
@@ -80,13 +150,17 @@ void render_features_designer(AppState &state) {
     }
 
     ImGui::TextColored(chip_fg_warn(), "\xE2\x9A\xA0 Phase 5 preview.");
-    text_subtle("Editor, IR, SH-2A codegen, and .stmod persistence "
-                "all shipped. Patch insertion + flashing wait on the "
-                "bench rig — see docs/16.");
+    text_subtle("Editor, validation, .stmod persistence, and transient compilation are available. "
+                "Patch insertion and flashing remain gated — see docs/16.");
 
     ImGui::Spacing();
     ImGui::Text("Nodes: %zu     Edges: %zu", state.features_graph.nodes().size(),
                 state.features_graph.edges().size());
+    ImGui::SameLine();
+    auto const document_name = state.features_document_path.empty()
+                                   ? std::string{"Untitled.stmod"}
+                                   : state.features_document_path.filename().string();
+    text_subtle("%s%s", document_name.c_str(), state.features_document_dirty ? "  • Unsaved" : "");
 
     // Helper-lambda for spawning nodes at a free-ish slot.
     auto const next_slot_y = [&]() {
@@ -148,6 +222,7 @@ void render_features_designer(AppState &state) {
                 for (auto const &s : decl_outputs)
                     push_pin(s, out_dir);
                 state.features_graph.add_node(std::move(n));
+                state.features_document_dirty = true;
             };
 
             if (!hooks.empty()) {
@@ -203,6 +278,7 @@ void render_features_designer(AppState &state) {
             n.pins.push_back(st::feature::Pin{0, "out", st::feature::PinType::Float,
                                               st::feature::PinDirection::Output, ""});
             state.features_graph.add_node(std::move(n));
+            state.features_document_dirty = true;
         }
         ImGui::SameLine();
         if (ImGui::Button("Add sink (Float in)")) {
@@ -214,6 +290,7 @@ void render_features_designer(AppState &state) {
             n.pins.push_back(st::feature::Pin{0, "in", st::feature::PinType::Float,
                                               st::feature::PinDirection::Input, ""});
             state.features_graph.add_node(std::move(n));
+            state.features_document_dirty = true;
         }
         ImGui::SameLine();
         if (ImGui::Button("Add 2-in/1-out (Float)")) {
@@ -229,17 +306,43 @@ void render_features_designer(AppState &state) {
             n.pins.push_back(st::feature::Pin{2, "out", st::feature::PinType::Float,
                                               st::feature::PinDirection::Output, ""});
             state.features_graph.add_node(std::move(n));
+            state.features_document_dirty = true;
         }
     }
-    ImGui::SameLine();
-    if (ImGui::Button("\xEE\x9D\x9A  Clear graph")) {
+    auto const reset_graph_document = [&state] {
         state.features_graph = st::feature::Graph{};
+        state.features_document_path.clear();
+        state.features_document_dirty = false;
         state.features_wiring_active = false;
         state.features_wire_error.clear();
         state.features_selected_nodes.clear();
         state.features_selected_edge.reset();
         state.features_context_edge.reset();
         state.features_band_active = false;
+    };
+    ImGui::SameLine();
+    if (ImGui::Button("\xEE\x9D\x9A  Clear graph")) {
+        if (state.features_document_dirty) {
+            ImGui::OpenPopup("Discard unsaved feature graph?##features_clear_confirm");
+        } else {
+            reset_graph_document();
+        }
+    }
+    ImGui::SetNextWindowSize(ImVec2(430.0f, 0.0f), ImGuiCond_Appearing);
+    if (ImGui::BeginPopupModal("Discard unsaved feature graph?##features_clear_confirm", nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextWrapped(
+            "Clearing will permanently discard the unsaved nodes, wires, and pin values.");
+        ImGui::Spacing();
+        if (ImGui::Button("Keep editing")) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Discard and clear")) {
+            reset_graph_document();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
     }
     ImGui::SameLine();
     if (ImGui::Button("\xEE\x9C\xAC  Reset view")) {
@@ -247,44 +350,86 @@ void render_features_designer(AppState &state) {
         state.features_view_scale = 1.0f;
     }
     ImGui::SameLine();
-    if (ImGui::Button("\xEE\x9D\x8E  Save…")) {
+    if (ImGui::Button(state.features_document_path.empty() ? "\xEE\x9D\x8E  Save…"
+                                                           : "\xEE\x9D\x8E  Save")) {
+        if (!state.features_document_path.empty()) {
+            (void)save_feature_document(state, state.features_document_path);
+        } else {
         nfdu8filteritem_t filters[1] = {{"SubuwuTuner mod (TOML)", "stmod"}};
-        NFD::UniquePathU8 out;
-        nfdresult_t const r = NFD::SaveDialog(out, filters, 1, nullptr, "graph.stmod");
-        if (r == NFD_OKAY) {
-            std::ofstream ofs{out.get(), std::ios::trunc};
-            if (!ofs) {
-                state.features_wire_error = std::string{"save: cannot open "} + out.get();
-            } else {
-                ofs << st::feature::to_toml(state.features_graph);
-                state.features_wire_error.clear();
+        std::string default_dir;
+        if (!state.features_document_path.empty()) {
+            default_dir = state.features_document_path.parent_path().string();
+        } else if (state.project.has_value()) {
+            auto const project_features = state.project->dir() / "features";
+            std::error_code ec;
+            std::filesystem::create_directories(project_features, ec);
+            if (!ec) {
+                default_dir = project_features.string();
             }
+        }
+        NFD::UniquePathU8 out;
+        nfdresult_t const r = NFD::SaveDialog(out, filters, 1,
+                                              default_dir.empty() ? nullptr : default_dir.c_str(),
+                                              document_name.c_str());
+        if (r == NFD_OKAY) {
+            (void)save_feature_document(state, std::filesystem::path{out.get()});
+        }
         }
     }
     ImGui::SameLine();
     if (ImGui::Button("\xEE\x86\x97  Load…")) {
+        if (state.features_document_dirty) {
+            ImGui::OpenPopup("Discard unsaved feature graph?##features_load_confirm");
+        } else {
+            state.features_open_load_dialog = true;
+        }
+    }
+    ImGui::SetNextWindowSize(ImVec2(430.0f, 0.0f), ImGuiCond_Appearing);
+    if (ImGui::BeginPopupModal("Discard unsaved feature graph?##features_load_confirm", nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextWrapped(
+            "Loading another .stmod will permanently discard the current unsaved graph.");
+        ImGui::Spacing();
+        if (ImGui::Button("Keep editing")) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Discard and load")) {
+            state.features_open_load_dialog = true;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+    if (state.features_open_load_dialog) {
+        state.features_open_load_dialog = false;
         nfdu8filteritem_t filters[1] = {{"SubuwuTuner mod (TOML)", "stmod"}};
+        std::string default_dir;
+        if (!state.features_document_path.empty()) {
+            default_dir = state.features_document_path.parent_path().string();
+        } else if (state.project.has_value()) {
+            default_dir = (state.project->dir() / "features").string();
+        }
         NFD::UniquePathU8 out;
-        nfdresult_t const r = NFD::OpenDialog(out, filters, 1);
+        nfdresult_t const r = NFD::OpenDialog(
+            out, filters, 1, default_dir.empty() ? nullptr : default_dir.c_str());
         if (r == NFD_OKAY) {
-            std::ifstream ifs{out.get(), std::ios::binary};
-            if (!ifs) {
-                state.features_wire_error = std::string{"load: cannot open "} + out.get();
+            auto loaded = st::feature::load_file(std::filesystem::path{out.get()});
+            if (!loaded.has_value()) {
+                state.features_wire_error = "load: " + loaded.error().to_string();
+                enqueue_toast(state, ToastKind::Danger, state.features_wire_error);
             } else {
-                std::stringstream buf;
-                buf << ifs.rdbuf();
-                auto loaded = st::feature::from_toml(buf.str());
-                if (!loaded.has_value()) {
-                    state.features_wire_error = "load: " + loaded.error().to_string();
-                } else {
                     state.features_graph = std::move(*loaded);
+                    state.features_document_path = std::filesystem::path{out.get()};
+                    state.features_document_dirty = false;
                     state.features_wiring_active = false;
                     state.features_wire_error.clear();
                     state.features_selected_nodes.clear();
                     state.features_selected_edge.reset();
                     state.features_context_edge.reset();
                     state.features_band_active = false;
-                }
+                    enqueue_toast(state, ToastKind::Success,
+                                  "Feature graph loaded: " +
+                                      std::filesystem::path{out.get()}.filename().string());
             }
         }
     }
@@ -336,6 +481,29 @@ void render_features_designer(AppState &state) {
                         "and has no completeness warnings.");
         }
         ImGui::EndPopup();
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("Compile preview")) {
+        compile_feature_preview(state);
+    }
+    if (!state.features_compile_error.empty()) {
+        ImGui::TextColored(chip_fg_danger(), "%s", state.features_compile_error.c_str());
+    } else if (!state.features_compile_arch.empty()) {
+        bool const stale = state.features_compile_graph_toml != st::feature::to_toml(state.features_graph);
+        bool const no_hooks = state.features_compile_hooks == 0;
+        ImGui::TextColored((stale || no_hooks) ? chip_fg_warn() : chip_fg_ok(),
+                           "%s%s | %zu IR instruction%s | %zu hook%s | %zu code bytes | %zu RAM bytes",
+                           state.features_compile_arch.c_str(), stale ? " (out of date)" : "",
+                           state.features_compile_instructions,
+                           state.features_compile_instructions == 1 ? "" : "s",
+                           state.features_compile_hooks, state.features_compile_hooks == 1 ? "" : "s",
+                           state.features_compile_bytes, state.features_compile_ram_bytes);
+        ImGui::TextWrapped("%s", state.features_compile_gate.c_str());
+        if (ImGui::TreeNode("Lowered IR##features_compile_ir")) {
+            ImGui::TextUnformatted(state.features_compile_ir.c_str());
+            ImGui::TreePop();
+        }
     }
 
     if (!state.features_wire_error.empty()) {
@@ -711,10 +879,12 @@ void render_features_designer(AppState &state) {
                     if (auto const *nn = state.features_graph.find_node(id)) {
                         state.features_graph.set_node_position(id, nn->x + d.x / scale,
                                                                nn->y + d.y / scale);
+                        state.features_document_dirty = true;
                     }
                 }
             } else {
                 state.features_graph.set_node_position(n.id, n.x + d.x / scale, n.y + d.y / scale);
+                state.features_document_dirty = true;
             }
         }
         // Snap-to-grid on drag release. IsItemDeactivated fires once
@@ -732,6 +902,7 @@ void render_features_designer(AppState &state) {
                     float const sx = std::round(nn->x / kGridStep) * kGridStep;
                     float const sy = std::round(nn->y / kGridStep) * kGridStep;
                     state.features_graph.set_node_position(id, sx, sy);
+                    state.features_document_dirty = true;
                 }
             };
             if (active_in_sel) {
@@ -1148,6 +1319,7 @@ void render_features_designer(AppState &state) {
                         state.features_wire_error = r.error().to_string();
                     } else {
                         state.features_wire_error.clear();
+                        state.features_document_dirty = true;
                     }
                 }
             }
@@ -1227,9 +1399,11 @@ void render_features_designer(AppState &state) {
     if (pending_default.has_value()) {
         state.features_graph.set_pin_default(pending_default->node_id, pending_default->pin_id,
                                              pending_default->value);
+        state.features_document_dirty = true;
     }
     if (pending_delete_edge.has_value()) {
         state.features_graph.remove_edge(*pending_delete_edge);
+        state.features_document_dirty = true;
         if (state.features_selected_edge.has_value() &&
             edge_eq(*state.features_selected_edge, *pending_delete_edge)) {
             state.features_selected_edge.reset();
@@ -1237,6 +1411,7 @@ void render_features_designer(AppState &state) {
     }
     for (auto const id : pending_delete_nodes) {
         state.features_graph.remove_node(id);
+        state.features_document_dirty = true;
         // If the user was about to wire FROM this node, drop the
         // wiring state so we don't reference a vanished pin.
         if (state.features_wiring_active && state.features_wiring_from_node == id) {

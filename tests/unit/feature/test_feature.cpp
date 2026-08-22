@@ -5,6 +5,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <filesystem>
+#include <fstream>
+#include <random>
+
 namespace {
 
 st::feature::Node make_source_node(char const *kind, st::feature::PinType t) {
@@ -192,6 +196,44 @@ TEST_CASE("Graph TOML round-trip preserves shape", "[feature][toml]") {
     REQUIRE(loaded->nodes()[0].x == 12.5f);
     REQUIRE(loaded->nodes()[1].y == 80.5f);
     REQUIRE(loaded->validate().has_value());
+}
+
+TEST_CASE("Graph file persistence round-trips and reports filesystem failures",
+          "[feature][file]") {
+    auto const dir = std::filesystem::temp_directory_path() /
+                     ("st_feature_file_" + std::to_string(std::random_device{}()));
+    std::filesystem::create_directories(dir);
+    struct Cleanup {
+        std::filesystem::path path;
+        ~Cleanup() {
+            std::error_code ec;
+            std::filesystem::remove_all(path, ec);
+        }
+    } cleanup{dir};
+
+    st::feature::Graph graph;
+    auto const source =
+        graph.add_node(make_source_node("rpm", st::feature::PinType::Float));
+    auto const sink = graph.add_node(make_sink_node("limit", st::feature::PinType::Float));
+    graph.set_node_position(source, 33.0f, 44.0f);
+    graph.set_pin_default(sink, 0, 5.0);
+    REQUIRE(graph.connect(source, 0, sink, 0).has_value());
+
+    auto const path = dir / "roundtrip.stmod";
+    REQUIRE(st::feature::save_file(graph, path).has_value());
+    auto loaded = st::feature::load_file(path);
+    REQUIRE(loaded.has_value());
+    CHECK(st::feature::to_toml(*loaded) == st::feature::to_toml(graph));
+
+    auto missing = st::feature::load_file(dir / "missing.stmod");
+    REQUIRE_FALSE(missing.has_value());
+    CHECK(missing.error().code() == st::ErrorCode::FileNotFound);
+
+    auto const malformed_path = dir / "malformed.stmod";
+    std::ofstream{malformed_path} << "[graph]\n";
+    auto malformed = st::feature::load_file(malformed_path);
+    REQUIRE_FALSE(malformed.has_value());
+    CHECK(malformed.error().code() == st::ErrorCode::ParseError);
 }
 
 TEST_CASE("Graph from_toml rejects unknown pin type", "[feature][toml]") {

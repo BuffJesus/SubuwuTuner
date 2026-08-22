@@ -9,11 +9,14 @@
 
 #include "modals/modals.hpp"
 
+#include "actions.hpp"
 #include "app_state.hpp"
 #include "widgets/widgets.hpp"
 
+#include "st/diff.hpp"
 #include "st/flash.hpp"
 #include "st/policy.hpp"
+#include "st/policy/flash_preflight.hpp"
 #include "st/profile.hpp"
 
 #include <imgui.h>
@@ -24,7 +27,9 @@
 #include <iterator>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 namespace st::ui {
 namespace {
@@ -35,7 +40,48 @@ struct PendingFlash {
     st::flash::FlashPlan plan;
     st::flash::PolicyDecision decision;
     std::size_t total_bytes;
+    std::vector<st::diff::TableDelta> changed_tables;
+    std::size_t tables_skipped{0};
+    std::optional<std::string> matched_cid{};
+    std::size_t approved_calibration_regions{0};
+    std::size_t candidate_calibration_regions{0};
+    st::DiagnosticReport preflight;
 };
+
+std::string_view blocker_action(std::string_view category) {
+    using namespace st::policy;
+    if (category == kCatEcuIdentityKnown || category == kCatEcuIdMatch) {
+        return "Connect through the supported transport and read the live ECU CID again.";
+    }
+    if (category == kCatDefinitionMatch) {
+        return "Select and lint the definition matching that exact observed CID.";
+    }
+    if (category == kCatSourceImage) {
+        return "Preserve the original read, hash it, and confirm it matches this project source.";
+    }
+    if (category == kCatRecoveryImage || category == kCatBackupPresent) {
+        return "Attach and attest a readable exact-CID recovery image before writing.";
+    }
+    if (category == kCatJournalSafety) {
+        return "Resolve or explicitly resume the interrupted flash journal.";
+    }
+    if (category == kCatWriteRegions || category == kCatWriteExtent) {
+        return "Restrict the plan to approved exact-CID calibration regions.";
+    }
+    if (category == kCatBatteryVoltage) {
+        return "Stabilize and re-measure bench/vehicle voltage within the required range.";
+    }
+    if (category == kCatIgnitionOn) {
+        return "Confirm ignition state through the live preflight probe.";
+    }
+    if (category == kCatChecksumKnown) {
+        return "Configure and validate the checksum strategy for this exact ROM family.";
+    }
+    if (category == kCatEcuCommunication) {
+        return "Stop OBD retries and follow the documented external recovery path.";
+    }
+    return "Resolve this proof requirement and rerun preflight.";
+}
 
 std::optional<PendingFlash> build_pending_flash(AppState const &state) {
     if (!state.project.has_value())
@@ -66,6 +112,63 @@ std::optional<PendingFlash> build_pending_flash(AppState const &state) {
     }
     pf.decision = st::flash::evaluate_plan_policy(pf.plan, proj.definition(),
                                                   proj.source_rom().data(), proj.policy_profile());
+
+    // Add a semantic preview alongside the transport-level sector count.
+    // The flash plan knows which bytes will be written, but the user needs
+    // to know which named calibrations those bytes belong to before they
+    // approve a destructive operation. Aggregate-only diffing keeps this
+    // preview light; the full cell list remains in Compare.
+    st::diff::Options diff_options;
+    diff_options.include_cell_list = false;
+    diff_options.include_identical = false;
+    if (auto diff = st::diff::compare(proj.source_rom(), proj.working_rom(),
+                                      proj.definition(), diff_options);
+        diff.has_value()) {
+        pf.tables_skipped = diff->skipped.size();
+        pf.changed_tables = std::move(diff->tables);
+    }
+
+    // The GUI has no live ECU binding yet, so this deliberately constructs a
+    // conservative offline preflight report. Local project facts populate
+    // only what is actually known; identity, backup, recovery image,
+    // journal, and approved-region evidence remain unverified blockers.
+    st::policy::PreflightContext preflight_ctx;
+    preflight_ctx.profile = proj.policy_profile();
+    preflight_ctx.checksum_strategy_known = !proj.definition().pack().checksum_type.empty();
+    preflight_ctx.source_rom_size = proj.source_rom().size();
+    preflight_ctx.bytes_to_write = pf.total_bytes;
+
+    // A source-ROM match is useful local evidence, but it is not proof that
+    // the connected ECU is the same unit. Use it to select only approved
+    // exact-CID calibration ranges; the canonical identity validator still
+    // blocks until a live observed CID is supplied by a transport binding.
+    if (auto const match = proj.definition().match_info(proj.source_rom());
+        match.has_value()) {
+        pf.matched_cid = match->cid;
+        preflight_ctx.expected_ecu_id = match->cid;
+        preflight_ctx.definition_match_verified = true;
+        for (auto const &region : proj.definition().calibration_regions()) {
+            if (region.cid != match->cid)
+                continue;
+            if (region.status == "approved") {
+                ++pf.approved_calibration_regions;
+            } else {
+                ++pf.candidate_calibration_regions;
+            }
+        }
+        for (auto const *region : proj.definition().approved_calibration_regions(match->cid)) {
+            preflight_ctx.approved_write_regions.push_back(
+                {static_cast<std::uint64_t>(region->address),
+                 static_cast<std::uint64_t>(region->length)});
+        }
+    }
+    preflight_ctx.planned_write_ranges.reserve(pf.plan.writes.size());
+    for (auto const &write : pf.plan.writes) {
+        preflight_ctx.planned_write_ranges.push_back(
+            {static_cast<std::uint64_t>(write.sector.address),
+             static_cast<std::uint64_t>(write.sector.length)});
+    }
+    pf.preflight = st::policy::default_pipeline().run(preflight_ctx);
     return pf;
 }
 
@@ -130,6 +233,105 @@ void render_flash_modal(AppState &state) {
     text_subtle("Policy profile: %s", pname.c_str());
     glossary_tooltip_for(state, "Flash");
 
+    bool const local_plan_ready = pending->matched_cid.has_value() &&
+                                  pending->approved_calibration_regions != 0 &&
+                                  !state.project->definition().pack().checksum_type.empty() &&
+                                  d.engine_safety_tables.empty();
+    ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
+    ImGui::TextUnformatted("Truth state");
+    ImGui::TextDisabled("Local plan");
+    ImGui::SameLine(130.0f);
+    chip(local_plan_ready ? "Coherent for offline review" : "Needs local work",
+         local_plan_ready ? chip_fg_ok() : chip_fg_caution(),
+         local_plan_ready ? chip_bg_ok() : chip_bg_caution());
+    ImGui::TextDisabled("Live ECU");
+    ImGui::SameLine(130.0f);
+    chip("Unverified / write blocked", chip_fg_danger(), chip_bg_danger());
+
+    if (ImGui::CollapsingHeader("Plain-language review", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::TextColored(chip_fg_accent(), "What will change");
+        ImGui::TextWrapped("%zu named calibration table%s and %zu flash sector%s are in the "
+                           "current source-to-working-ROM delta.",
+                           pending->changed_tables.size(),
+                           pending->changed_tables.size() == 1 ? "" : "s",
+                           pending->plan.writes.size(),
+                           pending->plan.writes.size() == 1 ? "" : "s");
+        ImGui::TextColored(chip_fg_accent(), "Why it changed");
+        ImGui::TextWrapped("The project records %zu applied edit operation%s. Review their "
+                           "descriptions in History; this screen does not invent intent that "
+                           "was not recorded.",
+                           state.project->active_history().cursor(),
+                           state.project->active_history().cursor() == 1 ? "" : "s");
+        ImGui::TextColored(chip_fg_accent(), "What evidence supports it");
+        ImGui::TextWrapped(
+            "%s. The definition contributes %zu approved exact-CID calibration region%s. "
+            "A local match is not a live ECU identity check.",
+            pending->matched_cid.has_value()
+                ? ("Source ROM matches CID " + *pending->matched_cid).c_str()
+                : "The source ROM has no exact CID match",
+            pending->approved_calibration_regions,
+            pending->approved_calibration_regions == 1 ? "" : "s");
+        ImGui::TextColored(chip_fg_accent(), "What is risky");
+        ImGui::TextWrapped("%zu engine-safety and %zu emissions-relevant table flag%s are in "
+                           "the policy decision. Unknown live identity, backup, recovery, and "
+                           "electrical state remain separate blockers.",
+                           d.engine_safety_tables.size(), d.emissions_tables.size(),
+                           d.engine_safety_tables.size() + d.emissions_tables.size() == 1 ? ""
+                                                                                         : "s");
+        ImGui::TextColored(chip_fg_accent(), "How to undo it");
+        ImGui::TextWrapped("Use History to undo recorded edits, reset individual table cells "
+                           "to Source, or restore a verified project checkpoint. None of these "
+                           "actions substitutes for an ECU recovery image.");
+        ImGui::TextColored(chip_fg_accent(), "What must be verified after power-cycle");
+        ImGui::TextWrapped("Re-identify the ECU, confirm communication, read back every written "
+                           "sector, compare it with this plan, verify checksums, and record the "
+                           "result before declaring the flash successful.");
+    }
+
+    // Semantic delta preview. This is intentionally above the policy
+    // details: users should first see the human meaning of the write, then
+    // the jurisdiction and safety decision that governs it. Rows are
+    // actionable links rather than decorative text — clicking one closes
+    // the modal and opens that table in the Tune workspace for inspection.
+    if (!pending->changed_tables.empty()) {
+        ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
+        char header[96];
+        std::snprintf(header, sizeof header, "Changed tables (%zu)",
+                      pending->changed_tables.size());
+        if (ImGui::CollapsingHeader(header, ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::Indent();
+            for (auto const &table : pending->changed_tables) {
+                ImGui::PushID(table.table_id.c_str());
+                char label[256];
+                char const *const safety = table.engine_safety_critical ? "  ·  engine safety" :
+                    (table.emissions_relevant ? "  ·  emissions" : "");
+                std::snprintf(label, sizeof label, "%s  ·  %zu cell%s  ·  max |Δ| %.4g%s",
+                              table.table_name.empty() ? table.table_id.c_str()
+                                                        : table.table_name.c_str(),
+                              table.cells_changed,
+                              table.cells_changed == 1 ? "" : "s",
+                              table.max_abs_delta, safety);
+                if (ImGui::Selectable(label, false)) {
+                    ImGui::CloseCurrentPopup();
+                    jump_to_table(state, table.table_id);
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("%s\nClick to inspect this table before flashing.",
+                                     table.table_id.c_str());
+                }
+                ImGui::PopID();
+            }
+            if (pending->tables_skipped > 0) {
+                ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
+                text_subtle("%zu table%s could not be summarized by the definition pack; "
+                            "the byte-level plan still remains subject to policy.",
+                            pending->tables_skipped,
+                            pending->tables_skipped == 1 ? "" : "s");
+            }
+            ImGui::Unindent();
+        }
+    }
+
     // Expandable summary of the flagged tables in the plan. Without
     // this the user knows the byte count but not WHICH calibration
     // tables are flagged for safety or emissions. The policy
@@ -168,6 +370,50 @@ void render_flash_modal(AppState &state) {
                 ImGui::Unindent();
             }
         }
+    }
+
+    // Hardware-independent truth boundary. This is intentionally shown in
+    // the flash review itself, not only in Project Readiness: a user opening
+    // the destructive-action surface must see why local policy approval is
+    // not the same thing as ECU eligibility.
+    ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
+    ImGui::TextUnformatted("Hardware preflight");
+    if (pending->matched_cid.has_value()) {
+        text_subtle("Source ROM CID: %s  |  approved calibration regions: %zu  |  candidates not used: %zu",
+                    pending->matched_cid->c_str(), pending->approved_calibration_regions,
+                    pending->candidate_calibration_regions);
+    } else {
+        ImGui::TextColored(chip_fg_danger(),
+                           "Source ROM did not match an exact definition CID; no calibration allow-list was selected.");
+    }
+    auto const blockers = pending->preflight.blockers();
+    auto const warnings = pending->preflight.warnings();
+    if (blockers.empty()) {
+        ImGui::TextColored(chip_fg_ok(), "No preflight blockers in the available evidence.");
+    } else {
+        ImGui::TextColored(chip_fg_danger(), "%zu preflight blocker%s — hardware write refused.",
+                           blockers.size(), blockers.size() == 1 ? "" : "s");
+    }
+    if (!warnings.empty()) {
+        text_subtle("%zu preflight warning%s also need review.", warnings.size(),
+                    warnings.size() == 1 ? "" : "s");
+    }
+    if (ImGui::CollapsingHeader("Show preflight details", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::Indent();
+        for (auto const &diagnostic : pending->preflight.items()) {
+            ImVec4 const color = diagnostic.is_blocker() ? chip_fg_danger()
+                : (diagnostic.is_warning() ? chip_fg_caution() : chip_fg_info());
+            ImGui::PushStyleColor(ImGuiCol_Text, color);
+            ImGui::BulletText("%s: %s", diagnostic.category().data(),
+                             diagnostic.message().data());
+            ImGui::PopStyleColor();
+            if (diagnostic.is_blocker()) {
+                ImGui::Indent();
+                text_subtle("Action: %s", blocker_action(diagnostic.category()).data());
+                ImGui::Unindent();
+            }
+        }
+        ImGui::Unindent();
     }
 
     // Issue #10 sweep: when the user is viewing a non-working ROM
@@ -273,7 +519,7 @@ void render_flash_modal(AppState &state) {
     }
 
     // Action-specific UI: silent / confirm / confirm+reason.
-    bool ready_to_send = true;
+    bool ready_to_send = pending->preflight.ok();
     switch (d.overall_action) {
     case A::Silent:
     case A::Badge:
@@ -292,7 +538,10 @@ void render_flash_modal(AppState &state) {
             state.focus_pending_flash = false;
         }
         ImGui::Checkbox("I confirm flashing these emissions edits", &state.flash_confirm_checked);
-        ready_to_send = state.flash_confirm_checked;
+        // Compose with the preflight seed above -- the checkbox is an
+        // ADDITIONAL gate, never a substitute for the hardware
+        // blockers. Assigning here would discard them.
+        ready_to_send = ready_to_send && state.flash_confirm_checked;
         break;
     case A::ConfirmWithReason:
         if (state.focus_pending_flash) {
@@ -303,7 +552,8 @@ void render_flash_modal(AppState &state) {
         ImGui::TextUnformatted("Reason (required):");
         ImGui::InputTextMultiline("##flash_reason", state.flash_reason, sizeof state.flash_reason,
                                   ImVec2(-FLT_MIN, 60.0f));
-        ready_to_send = state.flash_confirm_checked && state.flash_reason[0] != '\0';
+        ready_to_send =
+            ready_to_send && state.flash_confirm_checked && state.flash_reason[0] != '\0';
         break;
     case A::Block:
         // Distinct from the engine-safety branch above: profile-level
@@ -366,7 +616,8 @@ void render_flash_modal(AppState &state) {
             ImGui::SetTooltip("Acknowledge that the plan cleared the policy gate.\n"
                               "No bytes are sent to any ECU.");
         } else {
-            ImGui::SetTooltip("Tick the confirm box (and fill the reason) first.");
+            ImGui::SetTooltip("Resolve the hardware preflight blockers first.\n"
+                              "No bytes are sent by this GUI.");
         }
     }
     // "Send to ECU" stays hidden until a real transport binding lands
@@ -382,9 +633,14 @@ void render_flash_modal(AppState &state) {
 
     ImGui::Spacing();
     ImGui::TextDisabled("ECU send is CLI-only in this build (no in-app transport "
-                        "binding yet). After Verify, drive the flash from:");
+                        "binding yet). After Verify:");
     ImGui::Indent();
-    ImGui::TextDisabled("subuwutuner-cli project-flash <dir> --trace …");
+    ImGui::TextDisabled("Preview again, hardware-free:");
+    ImGui::TextDisabled("  subuwutuner-cli project-flash <dir> [--trace <FILE.uds>]");
+    ImGui::TextDisabled("Write to a live ECU (needs a plan, not a project dir):");
+    ImGui::TextDisabled("  subuwutuner-cli flash-delta <source.bin> <target.bin> -o p.toml");
+    ImGui::TextDisabled("  subuwutuner-cli flash-apply --plan p.toml --transport obdx \\");
+    ImGui::TextDisabled("      --device COM5 --confirm --reason \"…\"");
     ImGui::Unindent();
 
     ImGui::EndPopup();

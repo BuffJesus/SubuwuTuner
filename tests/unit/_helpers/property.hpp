@@ -37,6 +37,7 @@
 #include <cstdint>
 #include <limits>
 #include <random>
+#include <span>
 #include <vector>
 
 namespace st::test {

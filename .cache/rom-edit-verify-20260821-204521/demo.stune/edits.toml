@@ -1,0 +1,24 @@
+# Edit history for this SubuwuTuner project. Generated
+# automatically; hand-edits are discouraged but possible.
+schema_version = 2
+cursor = 1
+
+[[edit]]
+  description = "add 1"
+  table_id    = "boost_target_high_octane"
+  [edit.before]
+  r_start = 0
+  r_end   = 0
+  c_start = 0
+  c_end   = 0
+  values = [
+    [50],
+  ]
+  [edit.after]
+  r_start = 0
+  r_end   = 0
+  c_start = 0
+  c_end   = 0
+  values = [
+    [51],
+  ]

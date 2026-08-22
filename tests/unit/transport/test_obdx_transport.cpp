@@ -519,7 +519,9 @@ TEST_CASE("obdx::Transport::send_recv writes TX request, reads unsolicited RX pu
 
 TEST_CASE("obdx::Transport::send_recv rejects oversized payload", "[transport][obdx_transport]") {
     auto pair = build_open_transport();
-    std::vector<std::uint8_t> too_big(300, 0xABU);
+    // TxLarge supports the 260-byte 0xB6 path; exceed its 12,000-byte
+    // wire limit (including the four-byte CAN ID prefix) instead.
+    std::vector<std::uint8_t> too_big(12'001, 0xABU);
     auto r = pair.transport->send_recv(too_big, milliseconds{100});
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);

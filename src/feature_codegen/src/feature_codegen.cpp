@@ -2834,15 +2834,31 @@ namespace {
 } // namespace
 
 Result<std::unique_ptr<IBackend>> select_backend(std::string_view platform) {
-    if (ieq(platform, "VA")) {
+    auto const has_platform_token = [platform](std::string_view wanted) {
+        std::size_t start = 0;
+        while (start <= platform.size()) {
+            auto const end = platform.find('.', start);
+            auto const token = platform.substr(
+                start, end == std::string_view::npos ? platform.size() - start : end - start);
+            if (ieq(token, wanted)) {
+                return true;
+            }
+            if (end == std::string_view::npos) {
+                break;
+            }
+            start = end + 1;
+        }
+        return false;
+    };
+    if (has_platform_token("VA")) {
         return std::unique_ptr<IBackend>{new Sh2aBackend{}};
     }
-    if (ieq(platform, "VB")) {
+    if (has_platform_token("VB")) {
         return std::unique_ptr<IBackend>{new Rh850Backend{}};
     }
     std::string msg{"select_backend: no codegen backend for platform '"};
     msg.append(platform);
-    msg.append("' (recognized: VA → sh2a, VB → rh850)");
+    msg.append("' (recognized tokens: VA → sh2a, VB → rh850)");
     return failure(ErrorCode::UnsupportedVersion, std::move(msg));
 }
 

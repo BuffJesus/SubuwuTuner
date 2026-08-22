@@ -10,8 +10,10 @@
 > Programming session (round 22, refined in round 51; SA L3 is
 > NOT required). Full chain shipped as
 > `subaru-dsc-unblock-sequence --write-cycle` and `subaru-flash-
-> write-cycle`. The commit gate at ROM `0x319E` requires `u16 BE
-> sum(0x6000..0x200000) == 0x5AA5` (round 58 T1#1, bit-exact
+> write-cycle`. Stock finalization is SID `0x37`; the previously cited
+> `31 01 0202` handler at ROM `0x319E` is a bench-donor/image-specific
+> variant, not the universal stock commit. Finalization requires
+> `u16 BE sum(0x6000..0x200000) == 0x5AA5` (round 58 T1#1, bit-exact
 > verified against a Fehr decat tune); the Atlas tune-export
 > pipeline `st::tune_export` (`docs/44-tune-export.md`,
 > `src/tune_export/`) preserves this. Bench LF79002P bricked on
@@ -71,6 +73,13 @@ fixup helpers differ:
 | `CreateRomWithFixup(cpu_info, *rom, fixup_word)` | Inject the fixup word into the ROM at the well-known offset | **gap** |
 | `WriteBlocksumsToRom(rom_in, *rom_out, block_sums, cpu_info)` | Inject per-block sums into the ROM blocksum table | **gap** |
 | `GetValueAtFixupPosition(cpu_info, rom)` | Read the current fixup word (for validation) | **gap** |
+
+**2026-08-21 checksum update.** The host-side VB invariant is now
+byte-verified across 16 canonical ROMs: sum u16 values in little-endian order
+over `[0, 0x3F0000)`, including the balance word at `0x3EFF7E`, to target
+`0x5AA5`. This closes the offline full-image fixup formula and position. It
+does not yet identify every per-block checksum field, prove the ECU-side
+enforcement path, or validate bank-swap durability on hardware.
 
 ## SecurityAccess Init variants (RE5 finding)
 
@@ -266,10 +275,10 @@ Three test cases pin the gate behavior at
    they're observed on the bench rig, then expose a `Flasher::set_fmats_mode`
    that the platform layer can call as part of `OpenComms` equivalent.
 
-4. **RH850 checksum-fixup pipeline** — `CalculateFixupValue` +
-   `CreateRomWithFixup` + `WriteBlocksumsToRom` + `GetValueAtFixupPosition`.
-   The RE6 Frida capture script (`findings/for-dan/ap3-toolkit/frida_capture_ecu_flash.py`)
-   will surface the fixup-word offset and the per-block sum table layout.
+4. **RH850 checksum-fixup pipeline** — implement the recovered u16-LE
+   `[0, 0x3F0000)` / `0x5AA5` contract with balance at `0x3EFF7E`, then test
+   it against all 16 canonical VB images. `WriteBlocksumsToRom`, ECU-side
+   enforcement, and bank-swap durability remain separate gaps.
 
 5. **Routine IDs catalog** — every `RoutineControl` call in the
    reference architecture has a per-platform routine ID. Once observed

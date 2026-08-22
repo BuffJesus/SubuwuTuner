@@ -1,0 +1,56 @@
+{
+  "schema": "subuwutuner.rom-semantic-evidence.v1",
+  "family": "LF9C/D/G/L",
+  "image_base": "0x6000",
+  "policy": {
+    "reviewed_proposals": true,
+    "automatic_application_authorized": false,
+    "secret_material_included": false
+  },
+  "candidates": [
+    {
+      "proposed_name": "sa_mark_response_pending",
+      "size": 8,
+      "body_sha256": "090206762730ec390b6434d2e1acb5cbefc70a624880e0120d6255dafc9fce48",
+      "locations": [
+        {"cid": "LF9C102P", "address": "0x98D1C"},
+        {"cid": "LF9D012H", "address": "0xA2B70"},
+        {"cid": "LF9G003T", "address": "0xAF494"},
+        {"cid": "LF9L000E", "address": "0xAF718"}
+      ]
+    },
+    {
+      "proposed_name": "copy_bytes_u16",
+      "size": 22,
+      "body_sha256": "baa67379e77885f44bfd2183c0c64b1f78662b95a1ac2eb9f65bb0075c10ffd1",
+      "locations": [
+        {"cid": "LF9C102P", "address": "0x991FA"},
+        {"cid": "LF9D012H", "address": "0xA304E"},
+        {"cid": "LF9G003T", "address": "0xAF972"},
+        {"cid": "LF9L000E", "address": "0xAFBF6"}
+      ]
+    },
+    {
+      "proposed_name": "sa_protocol_state_dispatch",
+      "size": 454,
+      "body_sha256": "e90c2b87b753b463e00a43fc82fe086693bdb3c9c305f0e0adbb27552eee2eaf",
+      "locations": [
+        {"cid": "LF9C102P", "address": "0x97F08"},
+        {"cid": "LF9D012H", "address": "0xA1D5C"},
+        {"cid": "LF9G003T", "address": "0xAE680"},
+        {"cid": "LF9L000E", "address": "0xAE904"}
+      ]
+    },
+    {
+      "proposed_name": "sa_key_transform_dispatch",
+      "size": 248,
+      "body_sha256": "fbe70cdaac1543d1066253b42c1e8ae1ea2b255c79f18e14feac44f7b31e61ba",
+      "locations": [
+        {"cid": "LF9C102P", "address": "0x992B0"},
+        {"cid": "LF9D012H", "address": "0xA3104"},
+        {"cid": "LF9G003T", "address": "0xAFA28"},
+        {"cid": "LF9L000E", "address": "0xAFCAC"}
+      ]
+    }
+  ]
+}

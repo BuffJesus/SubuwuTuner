@@ -1,0 +1,25 @@
+﻿{
+    "executable":  "D:\\Subuwu\\code\\.cache\\install-smoke-current\\subuwutuner-gui.exe",
+    "scenario":  "Welcome",
+    "project":  "",
+    "requested_window":  "800x600",
+    "pid":  3396,
+    "title":  "SubuwuTuner",
+    "responding":  true,
+    "stderr_empty":  true,
+    "stdout_bytes":  69,
+    "stderr_bytes":  0,
+    "termination":  "stopped-by-harness",
+    "exit_code":  null,
+    "screenshots":  [
+                        {
+                            "path":  "D:\\Subuwu\\code\\.cache\\ui-smoke-installed-welcome\\01-welcome.png",
+                            "width":  800,
+                            "height":  600,
+                            "bytes":  38454,
+                            "sampled_colors":  7,
+                            "non_black_ratio":  1,
+                            "sanity_passed":  true
+                        }
+                    ]
+}

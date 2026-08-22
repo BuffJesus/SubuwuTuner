@@ -287,3 +287,70 @@ TEST_CASE("emit_write_plan returns empty on wrong-size input",
     REQUIRE(emit_write_plan(too_small, good).empty());
     REQUIRE(emit_write_plan(good, too_small).empty());
 }
+
+// ---------------------------------------------------------------------------
+// Flash-ready checksum state + balance repair (task 47 §ROM-editing #4).
+// These distinguish "flash-ready checksum" (the ECU brick-protection sum
+// contract) from project integrity, and prove repair_balance re-tunes only
+// the compensating word.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("checksum_state classifies flash-ready vs needs-repair vs N/A",
+          "[tune_export][checksum]") {
+    auto pattern = make_pattern_rom();
+    REQUIRE(checksum_state(pattern) == ChecksumState::NeedsRepair);
+
+    auto balanced = make_pre_balanced_rom();
+    REQUIRE(checksum_state(balanced) == ChecksumState::FlashReady);
+    REQUIRE(flash_checksum(balanced) == kSumTarget);
+
+    std::vector<std::uint8_t> const small(64, 0u);
+    REQUIRE(checksum_state(small) == ChecksumState::NotApplicable);
+}
+
+TEST_CASE("repair_balance makes a ROM flash-ready and is idempotent",
+          "[tune_export][checksum]") {
+    auto rom = make_pattern_rom();
+    REQUIRE(checksum_state(rom) == ChecksumState::NeedsRepair);
+
+    REQUIRE(repair_balance(rom).has_value());
+    REQUIRE(checksum_state(rom) == ChecksumState::FlashReady);
+    REQUIRE(flash_checksum(rom) == kSumTarget);
+
+    auto const before = rom;
+    REQUIRE(repair_balance(rom).has_value());
+    REQUIRE(rom == before); // idempotent — no bytes change
+    REQUIRE(checksum_state(rom) == ChecksumState::FlashReady);
+}
+
+TEST_CASE("repair_balance preserves cal edits and only touches the balance cell",
+          "[tune_export][checksum]") {
+    auto rom = make_pre_balanced_rom();
+    std::size_t const edit_addr = 0x100000; // inside the summed window
+    rom[edit_addr] = static_cast<std::uint8_t>(rom[edit_addr] ^ 0xFFu);
+    REQUIRE(checksum_state(rom) == ChecksumState::NeedsRepair);
+
+    auto const edited = rom;
+    REQUIRE(repair_balance(rom).has_value());
+    REQUIRE(checksum_state(rom) == ChecksumState::FlashReady);
+    REQUIRE(rom[edit_addr] == edited[edit_addr]); // cal edit survived
+
+    bool only_balance_changed = true;
+    for (std::size_t i = 0; i < rom.size(); ++i) {
+        if (i == kBalanceOffset || i == kBalanceOffset + 1) {
+            continue;
+        }
+        if (rom[i] != edited[i]) {
+            only_balance_changed = false;
+            break;
+        }
+    }
+    REQUIRE(only_balance_changed);
+}
+
+TEST_CASE("repair_balance rejects a non-2MB image", "[tune_export][checksum]") {
+    std::vector<std::uint8_t> small(1024, 0u);
+    auto const r = repair_balance(small);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
+}

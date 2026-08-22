@@ -11,6 +11,7 @@
 
 #include <toml++/toml.hpp>
 
+#include <algorithm>
 #include <cctype>
 #include <charconv>
 #include <chrono>
@@ -65,6 +66,19 @@ Status copy_bytes(std::filesystem::path const &src, std::filesystem::path const 
                        "copy failed: " + src.string() + " -> " + dst.string());
     }
     return ok();
+}
+
+bool is_checkpoint_id(std::string_view id) {
+    if (id.empty() ||
+        !(std::isalnum(static_cast<unsigned char>(id.front())) != 0)) {
+        return false;
+    }
+    for (char const c : id) {
+        if (std::isalnum(static_cast<unsigned char>(c)) == 0 && c != '_' && c != '-') {
+            return false;
+        }
+    }
+    return true;
 }
 
 // Per-additional-ROM edit history lives under <project>/histories/<id>.toml.
@@ -375,6 +389,22 @@ std::string render_project_toml(Project const &p, std::uint32_t source_crc32,
             emit_string("notes       ", r.notes);
         }
     }
+
+    // Named immutable snapshots. This is additive metadata: older readers
+    // ignore [[checkpoint]] entries while source/working remain usable.
+    for (auto const &c : p.checkpoints()) {
+        ss << "\n";
+        ss << "[[checkpoint]]\n";
+        emit_string("id          ", c.id);
+        emit_string("display_name", c.display_name);
+        emit_string("path        ", c.path_rel.generic_string());
+        emit_string("created     ", c.created);
+        ss << "crc32        = " << c.crc32 << "\n";
+        ss << "byte_size    = " << c.byte_size << "\n";
+        if (!c.note.empty()) {
+            emit_string("note        ", c.note);
+        }
+    }
     return std::move(ss).str();
 }
 
@@ -634,6 +664,75 @@ Result<Project> Project::open(std::filesystem::path const &project_dir) {
         }
     }
 
+    // Named immutable checkpoints. Like additional ROMs, a bad optional
+    // checkpoint is non-fatal: the project itself still opens and the
+    // readiness surface can explain exactly what was lost.
+    if (auto const *arr = tbl["checkpoint"].as_array(); arr != nullptr) {
+        p.checkpoints_.reserve(arr->size());
+        std::size_t entry_idx = 0;
+        for (auto const &node : *arr) {
+            ++entry_idx;
+            auto const *ct = node.as_table();
+            if (ct == nullptr) {
+                p.checkpoint_warnings_.push_back(
+                    "[[checkpoint]] entry #" + std::to_string(entry_idx) +
+                    " is not a table; skipped");
+                continue;
+            }
+            Checkpoint entry;
+            entry.id = (*ct)["id"].value_or<std::string>("");
+            if (!is_checkpoint_id(entry.id)) {
+                p.checkpoint_warnings_.push_back(
+                    "[[checkpoint]] entry #" + std::to_string(entry_idx) +
+                    " has an invalid id; skipped");
+                continue;
+            }
+            bool duplicate = false;
+            for (auto const &existing : p.checkpoints_) {
+                if (existing.id == entry.id) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (duplicate) {
+                p.checkpoint_warnings_.push_back(
+                    "[[checkpoint]] '" + entry.id + "' is duplicated; skipped");
+                continue;
+            }
+            entry.display_name =
+                (*ct)["display_name"].value_or<std::string>(std::string{entry.id});
+            entry.note = (*ct)["note"].value_or<std::string>("");
+            entry.created = (*ct)["created"].value_or<std::string>("");
+            entry.path_rel = get_path(*ct, "path");
+            if (entry.path_rel.empty()) {
+                p.checkpoint_warnings_.push_back(
+                    "[[checkpoint]] '" + entry.id + "' missing required field 'path'; skipped");
+                continue;
+            }
+            auto rom_r = Rom::from_file(project_dir / entry.path_rel);
+            if (!rom_r.has_value()) {
+                p.checkpoint_warnings_.push_back(
+                    "[[checkpoint]] '" + entry.id + "' could not load '" +
+                    entry.path_rel.string() + "': " + rom_r.error().to_string() + "; skipped");
+                continue;
+            }
+            entry.rom = std::move(*rom_r);
+            entry.byte_size = entry.rom.size();
+            entry.crc32 = entry.rom.crc32();
+            auto const recorded_crc = static_cast<std::uint32_t>(
+                (*ct)["crc32"].value_or<std::int64_t>(0));
+            auto const recorded_size = static_cast<std::size_t>(
+                (*ct)["byte_size"].value_or<std::int64_t>(0));
+            if ((recorded_crc != 0 && recorded_crc != entry.crc32) ||
+                (recorded_size != 0 && recorded_size != entry.byte_size)) {
+                p.checkpoint_warnings_.push_back(
+                    "[[checkpoint]] '" + entry.id +
+                    "' metadata does not match its bytes; actual CRC/size used");
+            }
+            p.checkpoints_.push_back(std::move(entry));
+        }
+    }
+
     // edits.toml is optional. If present, restore the edit history so
     // cross-session undo works.
     auto const edits_path = project_dir / "edits.toml";
@@ -652,14 +751,16 @@ Result<Project> Project::open(std::filesystem::path const &project_dir) {
 
 Status Project::save_working_rom() {
     auto const path = dir_ / working_rel_;
-    std::ofstream out{path, std::ios::binary};
-    if (!out) {
-        return failure(ErrorCode::IoFailure, "cannot open: " + path.string());
-    }
-    out.write(reinterpret_cast<char const *>(working_.data().data()),
-              static_cast<std::streamsize>(working_.size()));
-    if (!out) {
-        return failure(ErrorCode::IoFailure, "write failed: " + path.string());
+    {
+        std::ofstream out{path, std::ios::binary};
+        if (!out) {
+            return failure(ErrorCode::IoFailure, "cannot open: " + path.string());
+        }
+        out.write(reinterpret_cast<char const *>(working_.data().data()),
+                  static_cast<std::streamsize>(working_.size()));
+        if (!out) {
+            return failure(ErrorCode::IoFailure, "write failed: " + path.string());
+        }
     }
 
     // Persist edit history alongside, if there's anything to save.
@@ -669,13 +770,68 @@ Status Project::save_working_rom() {
             return s;
         }
     }
-    return save_metadata();
+    if (auto metadata = save_metadata(); !metadata.has_value()) {
+        return metadata;
+    }
+    return verify_persisted_state();
 }
 
 Status Project::save_metadata() const {
     auto const toml_text = render_project_toml(*this, source_crc32_, working_.crc32(), created_,
                                                source_rel_, working_rel_, def_rel_);
     return write_file(dir_ / "project.toml", toml_text);
+}
+
+Status Project::verify_persisted_state() const {
+    auto reopened_result = Project::open(dir_);
+    if (!reopened_result.has_value()) {
+        return failure(reopened_result.error());
+    }
+    auto const &reopened = *reopened_result;
+    auto mismatch = [](std::string detail) -> Status {
+        return failure(ErrorCode::BadChecksum,
+                       "persisted project verification failed: " + std::move(detail));
+    };
+    if (!std::ranges::equal(reopened.source_.data(), source_.data())) {
+        return mismatch("source ROM bytes differ after reopen");
+    }
+    if (!std::ranges::equal(reopened.working_.data(), working_.data())) {
+        return mismatch("working ROM bytes differ after reopen");
+    }
+    if (reopened.source_crc32_ != source_crc32_) {
+        return mismatch("recorded source CRC32 changed after reopen");
+    }
+    if (reopened.active_rom_id_ != active_rom_id_) {
+        return mismatch("active ROM id changed after reopen");
+    }
+    if (reopened.def_.pack().id != def_.pack().id) {
+        return mismatch("definition pack changed after reopen");
+    }
+    if (render_history_toml(reopened.history_) != render_history_toml(history_)) {
+        return mismatch("working edit history changed after reopen");
+    }
+    if (reopened.additional_roms_.size() != additional_roms_.size()) {
+        return mismatch("additional ROM count changed after reopen");
+    }
+    for (auto const &expected : additional_roms_) {
+        auto const found = std::find_if(
+            reopened.additional_roms_.begin(), reopened.additional_roms_.end(),
+            [&expected](AdditionalRom const &candidate) { return candidate.id == expected.id; });
+        if (found == reopened.additional_roms_.end()) {
+            return mismatch("additional ROM '" + expected.id + "' is missing after reopen");
+        }
+        if (!std::ranges::equal(found->rom.data(), expected.rom.data())) {
+            return mismatch("additional ROM '" + expected.id + "' bytes differ after reopen");
+        }
+        if (render_history_toml(found->history) != render_history_toml(expected.history)) {
+            return mismatch("additional ROM '" + expected.id +
+                            "' history changed after reopen");
+        }
+    }
+    if (reopened.checkpoint_warnings_.size() != checkpoint_warnings_.size()) {
+        return mismatch("checkpoint integrity warnings changed after reopen");
+    }
+    return {};
 }
 
 Rom const *Project::find_rom_by_id(std::string_view id) const noexcept {
@@ -829,13 +985,10 @@ Status Project::save_active_rom() {
 }
 
 Status Project::save_all() {
-    // Always save working — even when history is empty, the user may
-    // have just hit Ctrl+S to "checkpoint" the project. Cheap on a
-    // 2 MB ROM and matches the v1 save_working_rom contract.
-    if (auto s = save_working_rom(); !s.has_value()) {
-        return s;
-    }
-    // Save additional ROMs that carry edit history. A ROM with no
+    // Save additional ROMs that carry edit history first. The final
+    // save_working_rom call writes metadata and performs a whole-project
+    // reopen verification, so every slot must already be durable by then.
+    // A ROM with no
     // history hasn't been edited via the GUI — skip to avoid
     // rewriting bytes the loader will read identically.
     for (auto &r : additional_roms_) {
@@ -875,7 +1028,10 @@ Status Project::save_all() {
         // what we just wrote to disk.
         r.crc32 = r.rom.crc32();
     }
-    return save_metadata();
+    // Always save working — even when history is empty, the user may have
+    // just hit Ctrl+S to checkpoint the project. This final call also proves
+    // all working/additional bytes and histories round-trip from disk.
+    return save_working_rom();
 }
 
 Status Project::add_additional_rom(AdditionalRom entry) {
@@ -911,6 +1067,110 @@ Status Project::add_additional_rom(AdditionalRom entry) {
         entry.crc32 = entry.rom.crc32();
     }
     additional_roms_.push_back(std::move(entry));
+    return {};
+}
+
+Status Project::create_checkpoint(std::string id, std::string display_name, std::string note) {
+    if (!is_checkpoint_id(id)) {
+        return failure(ErrorCode::InvalidArgument,
+                       "checkpoint id must be a safe slug beginning with a letter or digit");
+    }
+    for (auto const &c : checkpoints_) {
+        if (c.id == id) {
+            return failure(ErrorCode::InvalidArgument,
+                           "checkpoint id '" + id + "' already exists in this project");
+        }
+    }
+    if (display_name.empty()) {
+        display_name = id;
+    }
+
+    std::error_code ec;
+    auto const rel = std::filesystem::path{"checkpoints"} / (id + ".bin");
+    auto const absolute = dir_ / rel;
+    std::filesystem::create_directories(absolute.parent_path(), ec);
+    if (ec) {
+        return failure(ErrorCode::IoFailure,
+                       "cannot create checkpoint directory: " + absolute.parent_path().string());
+    }
+    std::string bytes(reinterpret_cast<char const *>(working_.data().data()), working_.size());
+    if (auto s = write_file(absolute, bytes); !s.has_value()) {
+        return s;
+    }
+
+    Checkpoint entry;
+    entry.id = std::move(id);
+    entry.display_name = std::move(display_name);
+    entry.note = std::move(note);
+    entry.created = iso8601_utc_now();
+    entry.crc32 = working_.crc32();
+    entry.byte_size = working_.size();
+    entry.path_rel = rel;
+    entry.rom = Rom::from_bytes(
+        std::vector<std::uint8_t>(working_.data().begin(), working_.data().end()));
+    checkpoints_.push_back(std::move(entry));
+
+    if (auto s = save_metadata(); !s.has_value()) {
+        checkpoints_.pop_back();
+        std::filesystem::remove(absolute, ec);
+        return s;
+    }
+    return {};
+}
+
+Status Project::restore_checkpoint(std::string_view id) {
+    Checkpoint const *checkpoint = nullptr;
+    for (auto const &candidate : checkpoints_) {
+        if (candidate.id == id) {
+            checkpoint = &candidate;
+            break;
+        }
+    }
+    if (checkpoint == nullptr) {
+        return failure(ErrorCode::InvalidArgument,
+                       "checkpoint id '" + std::string{id} + "' was not found");
+    }
+    if (checkpoint->rom.size() != working_.size()) {
+        return failure(ErrorCode::InvalidArgument,
+                       "checkpoint '" + checkpoint->id + "' has size " +
+                           std::to_string(checkpoint->rom.size()) +
+                           "; working ROM has size " + std::to_string(working_.size()));
+    }
+
+    std::vector<edit::ByteEdit::Change> changes;
+    changes.reserve(working_.size());
+    auto const before_bytes = std::vector<std::uint8_t>(working_.data().begin(),
+                                                         working_.data().end());
+    for (std::size_t address = 0; address < working_.size(); ++address) {
+        auto const before = before_bytes[address];
+        auto const after = checkpoint->rom.data()[address];
+        if (before != after) {
+            changes.push_back({address, before, after});
+        }
+    }
+    if (changes.empty()) {
+        return {};
+    }
+
+    auto const prior_history = history_.records();
+    auto const prior_cursor = history_.cursor();
+    for (auto const &change : changes) {
+        if (auto s = working_.write_u8(change.address, change.after); !s.has_value()) {
+            working_ = Rom::from_bytes(before_bytes);
+            return s;
+        }
+    }
+    history_.record(edit::Edit::bytes(
+        std::move(changes), "Restore checkpoint: " + checkpoint->display_name));
+
+    if (auto s = save_working_rom(); !s.has_value()) {
+        working_ = Rom::from_bytes(before_bytes);
+        history_.load(prior_history, prior_cursor);
+        // Best effort: put the on-disk working ROM/history back in sync with
+        // the state that existed before the failed restore.
+        (void)save_working_rom();
+        return s;
+    }
     return {};
 }
 

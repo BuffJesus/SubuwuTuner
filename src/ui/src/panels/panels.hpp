@@ -17,9 +17,8 @@
 #include "app_state.hpp"
 #include "theme.hpp" // Fonts for render_table_view
 
-#include <imgui.h>
-
 #include <cstdint>
+#include <imgui.h>
 #include <optional>
 #include <string>
 #include <vector>
@@ -56,12 +55,14 @@ void render_command_palette(AppState &state);
 
 // Panels.
 void render_welcome_panel(AppState &state);
+void render_readiness_panel(AppState &state);
 void render_stats_panel(AppState &state);
 void render_knock_dashboard_panel(AppState &state);
 void render_adaptive_history_panel(AppState &state);
 void render_coldstart_panel(AppState &state);
 void render_ebcs_panel(AppState &state);
 void render_gauge_cluster_panel(AppState &state);
+void render_log_explorer_panel(AppState &state);
 void render_compare_panel(AppState &state);
 void render_audit_panel(AppState &state);
 void render_dtcs_panel(AppState &state);
@@ -82,8 +83,8 @@ struct EtsStatusSnapshot {
     std::string hardware_type;        // cmd 0x2e — "AP-V3" / etc.
     std::string vehicle_manufacturer; // cmd 0x30 — "Subaru"
     std::string ap_manufacturer;      // cmd 0x31 — "COBB Tuning"
-    bool vehicle_paired{false};              // Installed vs Not Installed
-    bool paired_known{false};       // distinguishes nullopt from false
+    bool vehicle_paired{false};       // Installed vs Not Installed
+    bool paired_known{false};         // distinguishes nullopt from false
     // /backupcksum contents (MD5 of the plaintext stock ROM per J3 RE)
     // when the Device tab has cached it. Lowercase hex, 32 chars.
     // Empty / nullopt when not yet fetched. Library panel cross-refs
@@ -120,16 +121,16 @@ struct EtsPushResult {
     std::string ap_path; // absolute "/maps/<filename>" on ok
     std::string error;   // populated when !ok
 };
-[[nodiscard]] EtsPushResult ets_panel_push_to_maps(
-    std::string filename, std::vector<std::uint8_t> bytes);
+[[nodiscard]] EtsPushResult ets_panel_push_to_maps(std::string filename,
+                                                   std::vector<std::uint8_t> bytes);
 
 // Synchronous read of an arbitrary AP file via the panel's open
 // channel. Returns the raw bytes on success; on failure returns an
 // empty vector and writes the error string into `err`. Caller must
 // have verified ets_panel_has_channel(). Workflow-gated: returns
 // empty + an error when ST_HAVE_AP_WORKFLOW is undefined.
-[[nodiscard]] std::vector<std::uint8_t>
-ets_panel_read_file_sync(std::string_view ap_path, std::string &err);
+[[nodiscard]] std::vector<std::uint8_t> ets_panel_read_file_sync(std::string_view ap_path,
+                                                                 std::string &err);
 
 // Push a boot-screen framebuffer (RGB565 LE, 240x320, exactly
 // 153,600 bytes) to /images/startup_screen.fb on the connected AP.
@@ -140,9 +141,8 @@ ets_panel_read_file_sync(std::string_view ap_path, std::string &err);
 // success; populates `err` and returns empty on failure. Same
 // channel-single-stream caveat as the other panel helpers — call
 // only when no other AP op is in flight.
-[[nodiscard]] std::string
-ets_panel_push_boot_screen(std::vector<std::uint8_t> bytes,
-                            std::string &err);
+[[nodiscard]] std::string ets_panel_push_boot_screen(std::vector<std::uint8_t> bytes,
+                                                     std::string &err);
 
 // Library-panel snapshot for the status bar. Mirrors the AP status
 // snapshot pattern: file-static inside library.cpp; returns nullopt

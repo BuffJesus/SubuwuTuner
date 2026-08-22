@@ -1,0 +1,13 @@
+{
+  "schema": "subuwutuner.rom-pointer-aliases.v1",
+  "targets": {
+    "0xB543C": {
+      "literal_count": 0,
+      "aliases": []
+    },
+    "0xB550E": {
+      "literal_count": 0,
+      "aliases": []
+    }
+  }
+}

@@ -34,6 +34,7 @@ void AppState::try_open_project(std::filesystem::path const &path) {
         current_table_data.reset();
         selection.reset();
         last_save_iso.reset();
+        persisted_state_verified = false;
         active_rom_id.clear();
         return;
     }
@@ -44,6 +45,7 @@ void AppState::try_open_project(std::filesystem::path const &path) {
     selection.reset();
     dirty = false;
     last_save_iso.reset();
+    persisted_state_verified = project->verify_persisted_state().has_value();
     // Surface a status-bar badge if this project was produced by
     // `ptm import` (or the GUI equivalent). [ptm_metadata] is the
     // round-trip-preservation block we wrote at import time; its
@@ -198,6 +200,7 @@ void AppState::close_project() {
     status_msg.clear();
     dirty = false;
     last_save_iso.reset();
+    persisted_state_verified = false;
     active_rom_id.clear();
     sidebar_category_order.clear();
     sidebar_hidden_categories.clear();

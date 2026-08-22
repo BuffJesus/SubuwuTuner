@@ -173,6 +173,46 @@ emit_write_plan(std::span<std::uint8_t const> built_image,
 [[nodiscard]] std::string_view
 to_string(ValidationError::Kind k) noexcept;
 
+// ---- Flash-ready checksum state ---------------------------------------
+//
+// The "flash-ready checksum" is a DIFFERENT thing from project integrity.
+// Project integrity (st::Project::verify_persisted_state) asks "is the
+// on-disk project self-consistent?". This asks "does the working ROM
+// satisfy the ECU's brick-protection sum contract so a flash won't be
+// rejected (NRC 0x22) or boot into a corrupt app?". A project can be
+// perfectly coherent and still NOT be flash-ready because a cal edit
+// moved the sum off 0x5AA5 without re-tuning the balance cell.
+//
+// These queries target the LF79xxxP 2 MB SH-2A family (kWritableEnd-sized
+// images). For any other image size the answer is NotApplicable — the
+// 2.5 MB A.3 and RH850 windows differ and are out of scope here.
+
+enum class ChecksumState : std::uint8_t {
+    NotApplicable, // image is not a 2 MB SH-2A ROM — contract unknown here
+    FlashReady,    // u16be sum over [kSumRangeStart, kSumRangeEnd) == kSumTarget
+    NeedsRepair,   // sum != target — rewrite the balance cell before flashing
+};
+
+[[nodiscard]] std::string_view to_string(ChecksumState s) noexcept;
+
+// The u16 BE sum the ECU's commit gate checks, over the 2 MB app window.
+// A FlashReady ROM sums to kSumTarget (0x5AA5). Returns 0 for a ROM that
+// is too short to cover the window (also reported as NotApplicable by
+// checksum_state).
+[[nodiscard]] std::uint16_t
+flash_checksum(std::span<std::uint8_t const> rom) noexcept;
+
+// Classify a working ROM's flash-ready checksum state (see enum above).
+[[nodiscard]] ChecksumState
+checksum_state(std::span<std::uint8_t const> rom) noexcept;
+
+// Re-tune the compensating balance word at kBalanceOffset so the ROM
+// sums to kSumTarget. Idempotent: repairing an already-FlashReady ROM
+// leaves it byte-identical. Returns InvalidArgument for a non-2 MB image
+// (a size where the contract does not apply). This is the ONLY byte the
+// repair touches — every cal edit is preserved.
+[[nodiscard]] st::Status repair_balance(std::span<std::uint8_t> rom) noexcept;
+
 }  // namespace st::tune_export
 
 #endif  // ST_TUNE_EXPORT_HPP

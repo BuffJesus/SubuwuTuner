@@ -10,16 +10,15 @@
 // publicly-exposed seam for the View menu's "Reset window layout"
 // item and the Ctrl+K palette's matching command.
 
-#include "panels/panels.hpp"
-
 #include "app_state.hpp"
+#include "panels/panels.hpp"
 #include "widgets/widgets.hpp"
-
-#include <imgui.h>
-#include <imgui_internal.h>
 
 #include <algorithm>
 #include <cstdio>
+#include <imgui.h>
+#include <imgui_internal.h>
+#include <optional>
 #include <string>
 
 namespace st::ui {
@@ -31,7 +30,9 @@ namespace st::ui {
 namespace {
 bool g_request_dock_reset = false;
 }
-void request_layout_reset() { g_request_dock_reset = true; }
+void request_layout_reset() {
+    g_request_dock_reset = true;
+}
 
 // Apply a workspace preset: flip show_*_panel flags into a coherent set
 // for the chosen mode, leave dock positions alone (imgui.ini owns
@@ -50,6 +51,7 @@ void apply_workspace_mode(AppState &state, WorkspaceMode mode) {
         state.show_adaptive_history_panel = false;
         state.show_coldstart_panel = false;
         state.show_ebcs_panel = false;
+        state.show_log_explorer_panel = false;
         state.show_features_designer = false;
         break;
     case WorkspaceMode::Datalog:
@@ -68,6 +70,7 @@ void apply_workspace_mode(AppState &state, WorkspaceMode mode) {
         state.show_adaptive_history_panel = true;
         state.show_coldstart_panel = true;
         state.show_ebcs_panel = true;
+        state.show_log_explorer_panel = true;
         state.show_features_designer = false;
         break;
     case WorkspaceMode::Features:
@@ -82,6 +85,7 @@ void apply_workspace_mode(AppState &state, WorkspaceMode mode) {
         state.show_adaptive_history_panel = false;
         state.show_coldstart_panel = false;
         state.show_ebcs_panel = false;
+        state.show_log_explorer_panel = false;
         state.show_features_designer = true;
         break;
     }
@@ -115,12 +119,11 @@ void render_workspace_rail(AppState &state) {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(4.0f, 8.0f));
 
-    ImGuiWindowFlags const flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse |
-                                   ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
-                                   ImGuiWindowFlags_NoSavedSettings |
-                                   ImGuiWindowFlags_NoBringToFrontOnFocus |
-                                   ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoScrollbar |
-                                   ImGuiWindowFlags_NoDocking;
+    ImGuiWindowFlags const flags =
+        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus |
+        ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoDocking;
     ImGui::Begin("##workspace_rail", nullptr, flags);
     ImGui::PopStyleVar(3);
 
@@ -140,8 +143,8 @@ void render_workspace_rail(AppState &state) {
     char const *const kIconLightning = "\xEE\xA5\x85";
 
     auto const accent_base = accent_for(current_theme()).base;
-    auto const draw_workspace = [&](WorkspaceMode mode, char const *icon,
-                                    char const *caption, char const *tooltip) {
+    auto const draw_workspace = [&](WorkspaceMode mode, char const *icon, char const *caption,
+                                    char const *tooltip) {
         bool const is_active = (state.workspace_mode == mode);
         ImGui::PushID(caption);
         ImVec2 const cursor_screen = ImGui::GetCursorScreenPos();
@@ -162,8 +165,8 @@ void render_workspace_rail(AppState &state) {
             float const x1 = cursor_screen.x - 1.0f;
             float const y0 = cursor_screen.y + 6.0f;
             float const y1 = cursor_screen.y + kBtnH - 6.0f;
-            dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y1),
-                              ImGui::GetColorU32(accent_base), kStripeW * 0.5f);
+            dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y1), ImGui::GetColorU32(accent_base),
+                              kStripeW * 0.5f);
         }
 
         // Icon (top half, ~1.55× scale) + caption (bottom half, normal
@@ -184,13 +187,11 @@ void render_workspace_rail(AppState &state) {
         float const caption_y = icon_y + icon_sz.y + kStackGap;
         float const button_center_x = cursor_screen.x + kBtnW * 0.5f;
 
-        ImU32 const text_col = is_active
-                                   ? ImGui::GetColorU32(accent_base)
-                                   : ImGui::GetColorU32(ImGuiCol_Text);
-        dl->AddText(font, icon_size,
-                    ImVec2(button_center_x - icon_sz.x * 0.5f, icon_y), text_col, icon);
-        dl->AddText(ImVec2(button_center_x - caption_sz.x * 0.5f, caption_y), text_col,
-                    caption);
+        ImU32 const text_col =
+            is_active ? ImGui::GetColorU32(accent_base) : ImGui::GetColorU32(ImGuiCol_Text);
+        dl->AddText(font, icon_size, ImVec2(button_center_x - icon_sz.x * 0.5f, icon_y), text_col,
+                    icon);
+        dl->AddText(ImVec2(button_center_x - caption_sz.x * 0.5f, caption_y), text_col, caption);
 
         if (hovered) {
             ImGui::SetTooltip("%s", tooltip);
@@ -224,13 +225,29 @@ void render_workspace_rail(AppState &state) {
 // byte-for-byte — including the `###id` suffixes the Preview panels
 // use to preserve ImGui IDs across the title cleanup.
 void build_workspace_layout(WorkspaceMode const mode, ImGuiID const dockspace_id,
-                            ImVec2 const node_size) {
+                            ImVec2 const node_size, bool const compact) {
     ImGui::DockBuilderRemoveNode(dockspace_id);
     ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
     ImGui::DockBuilderSetNodeSize(dockspace_id, node_size);
 
     switch (mode) {
     case WorkspaceMode::Tune: {
+        if (compact) {
+            // On narrow windows preserve a useful editor/welcome surface.
+            // Tables gets a discoverable left strip; secondary inspection
+            // panels become tabs beside Table instead of consuming a fixed
+            // right rail that can squeeze the center down to nothing.
+            ImGuiID left = 0;
+            ImGuiID center = 0;
+            ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Left, 0.28f,
+                                        &left, &center);
+            ImGui::DockBuilderDockWindow("Tables", left);
+            ImGui::DockBuilderDockWindow("Table", center);
+            ImGui::DockBuilderDockWindow("Stats", center);
+            ImGui::DockBuilderDockWindow("History", center);
+            ImGui::DockBuilderDockWindow("DTCs", center);
+            break;
+        }
         // Tables left (18%) | Table central | right rail (22%) split
         // vertically: Stats on top (60%), History+DTCs as tabs on the
         // bottom (40%). Stats is the panel you actually read while
@@ -257,6 +274,21 @@ void build_workspace_layout(WorkspaceMode const mode, ImGuiID const dockspace_id
         break;
     }
     case WorkspaceMode::Datalog: {
+        if (compact) {
+            // A bottom DTC strip makes the main log controls unreachable at
+            // laptop sizes. Keep every analysis surface available as a tab.
+            ImGui::DockBuilderDockWindow("Log Explorer", dockspace_id);
+            ImGui::DockBuilderDockWindow(
+                "Knock Dashboard###Knock Dashboard (Preview)", dockspace_id);
+            ImGui::DockBuilderDockWindow(
+                "Adaptive History###Adaptive History (Preview)", dockspace_id);
+            ImGui::DockBuilderDockWindow(
+                "Cold-Start Analysis###Cold-Start Analysis (Preview)", dockspace_id);
+            ImGui::DockBuilderDockWindow(
+                "EBCS PID Assistant###EBCS PID Assistant (Preview)", dockspace_id);
+            ImGui::DockBuilderDockWindow("DTCs", dockspace_id);
+            break;
+        }
         // Full-width datalog work area — Knock / Adaptive / Cold-Start
         // / EBCS as a tab strip in the central node, DTCs as a bottom
         // strip for active-code cross-reference against observed
@@ -268,12 +300,11 @@ void build_workspace_layout(WorkspaceMode const mode, ImGuiID const dockspace_id
         ImGuiID bottom = 0;
         ImGuiID top = 0;
         ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Down, 0.25f, &bottom, &top);
+        ImGui::DockBuilderDockWindow("Log Explorer", top);
         ImGui::DockBuilderDockWindow("Knock Dashboard###Knock Dashboard (Preview)", top);
         ImGui::DockBuilderDockWindow("Adaptive History###Adaptive History (Preview)", top);
-        ImGui::DockBuilderDockWindow(
-            "Cold-Start Analysis###Cold-Start Analysis (Preview)", top);
-        ImGui::DockBuilderDockWindow("EBCS PID Assistant###EBCS PID Assistant (Preview)",
-                                     top);
+        ImGui::DockBuilderDockWindow("Cold-Start Analysis###Cold-Start Analysis (Preview)", top);
+        ImGui::DockBuilderDockWindow("EBCS PID Assistant###EBCS PID Assistant (Preview)", top);
         ImGui::DockBuilderDockWindow("DTCs", bottom);
         break;
     }
@@ -341,12 +372,17 @@ void render_dockspace_host(AppState &state) {
     ImGui::PopStyleVar(3);
 
     ImGuiID const id = ImGui::GetID("MainDockSpace");
+    bool const compact = dock_w < 900.0f;
+    static std::optional<bool> prior_compact;
 
     // Reset request from a workspace switch, the View menu, or the
     // command palette. Drops the saved tree so the rebuild branch
     // below fires and lands the canonical layout for the current mode.
     bool const requested_reset = g_request_dock_reset;
-    if (requested_reset) {
+    bool const compact_transition =
+        prior_compact.has_value() && *prior_compact != compact;
+    prior_compact = compact;
+    if (requested_reset || compact_transition) {
         ImGui::DockBuilderRemoveNode(id);
         g_request_dock_reset = false;
     }
@@ -355,7 +391,7 @@ void render_dockspace_host(AppState &state) {
     // tree for the current workspace. Otherwise respect the user's
     // saved-and-customized layout from imgui.ini.
     if (ImGui::DockBuilderGetNode(id) == nullptr) {
-        build_workspace_layout(state.workspace_mode, id, vp->WorkSize);
+        build_workspace_layout(state.workspace_mode, id, ImVec2(dock_w, dock_h), compact);
     }
 
     ImGui::DockSpace(id, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_PassthruCentralNode);

@@ -55,6 +55,7 @@ void save_project(AppState &state) {
         // The user might be staring at the save button when this fires;
         // the toast confirms they triggered something.
         auto const err = "Save failed: " + s.error().to_string();
+        state.persisted_state_verified = false;
         state.status_msg = err;
         enqueue_toast(state, ToastKind::Danger, err);
         if (state.audit_log.has_value()) {
@@ -69,9 +70,10 @@ void save_project(AppState &state) {
     // transient confirmation and disappears on its own — no stale
     // "Saved." sticking around for minutes after.
     state.status_msg.clear();
-    enqueue_toast(state, ToastKind::Success, "Saved.");
+    enqueue_toast(state, ToastKind::Success, "Saved and verified.");
     state.dirty = false;
     state.last_save_iso = iso8601_utc_now();
+    state.persisted_state_verified = true;
     if (state.audit_log.has_value()) {
         (void)state.audit_log->log(
             st::audit::EntryKind::ProjectSaved, "ui", "Project saved",

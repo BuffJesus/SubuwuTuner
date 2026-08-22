@@ -66,6 +66,22 @@ public:
         edit::History history;
     };
 
+    // Immutable, named ROM snapshots used by offline review and flash
+    // readiness checks. A checkpoint is copied from the in-memory working
+    // ROM and never changes when the working ROM is edited afterward.
+    // The bytes are kept in memory after open() so compare/read-only UI
+    // surfaces do not need to perform their own filesystem loading.
+    struct Checkpoint {
+        std::string id;                // slug used in TOML + UI ids
+        std::string display_name;
+        std::string note;
+        std::string created;
+        std::uint32_t crc32{0};
+        std::size_t byte_size{0};
+        std::filesystem::path path_rel;
+        Rom rom{Rom::from_bytes({})};
+    };
+
     [[nodiscard]] static Result<Project> create(std::filesystem::path const &project_dir,
                                                 std::filesystem::path const &source_rom_path,
                                                 std::filesystem::path const &definition_path,
@@ -229,6 +245,13 @@ public:
     // recorded crc32 for each saved slot.
     [[nodiscard]] Status save_all();
 
+    // Reopen this project from disk and prove that every persisted byte/history
+    // slot still matches the current in-memory model. This is deliberately
+    // stronger than "the write calls succeeded": it catches truncated or
+    // redirected ROM writes, malformed history/metadata, missing additional
+    // ROMs, and round-trip drift before a GUI save is reported as clean.
+    [[nodiscard]] Status verify_persisted_state() const;
+
     // Read-only access to extra ROMs declared in project.toml as
     // [[rom]] entries (Issue #10 read slice). Empty when project.toml
     // declares none. Returned vector is sized once on Project::open;
@@ -253,6 +276,32 @@ public:
     // Returns InvalidArgument when id is empty or already in use.
     [[nodiscard]] Status add_additional_rom(AdditionalRom entry);
 
+    // Create an immutable checkpoint from the current working ROM. The id
+    // must be a safe slug ([a-zA-Z0-9_-]+, beginning with an alphanumeric),
+    // and must be unique within this project. The binary is written under
+    // checkpoints/<id>.bin and the manifest is updated atomically from the
+    // caller's point of view: a failed metadata write removes the new entry.
+    [[nodiscard]] Status create_checkpoint(std::string id, std::string display_name,
+                                           std::string note = {});
+
+    // Restore a named checkpoint into working.bin as one undoable byte
+    // transaction. This is deliberately separate from create_checkpoint:
+    // callers must make the destructive local action explicit. The method
+    // refuses a size mismatch and restores the prior in-memory bytes/history
+    // if persistence fails.
+    [[nodiscard]] Status restore_checkpoint(std::string_view id);
+
+    [[nodiscard]] std::vector<Checkpoint> const &checkpoints() const noexcept {
+        return checkpoints_;
+    }
+
+    // Warnings collected from [[checkpoint]] parsing. A missing or malformed
+    // checkpoint does not prevent the main source/working workflow from
+    // opening; the warning is surfaced to readiness UI and CLI callers.
+    [[nodiscard]] std::vector<std::string> const &checkpoint_warnings() const noexcept {
+        return checkpoint_warnings_;
+    }
+
 private:
     Project() = default;
 
@@ -274,6 +323,8 @@ private:
     edit::History history_;
     std::vector<AdditionalRom> additional_roms_;
     std::vector<std::string> additional_rom_warnings_;
+    std::vector<Checkpoint> checkpoints_;
+    std::vector<std::string> checkpoint_warnings_;
     std::string active_rom_id_; // "" = working slot (the v1 default)
 };
 

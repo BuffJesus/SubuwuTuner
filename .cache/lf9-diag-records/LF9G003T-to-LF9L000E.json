@@ -1,0 +1,170 @@
+{
+  "schema": "subuwutuner.rom-diag-record-parity.v1",
+  "left_cid": "LF9G003T",
+  "right_cid": "LF9L000E",
+  "stable_candidate_count": 20,
+  "disagreement_count": 0,
+  "stable_candidates": [
+    {
+      "left_address": "0x79C64",
+      "right_address": "0x79DDC",
+      "body_sha256": "1677c4c01aa7d32f24f37a35ae75142a1bcae22b3149119c11d9f132026e0c7f",
+      "size": 48,
+      "left_proposed_name": "diag_monitor_mature_bank02_rec06",
+      "right_proposed_name": "diag_monitor_mature_bank02_rec06"
+    },
+    {
+      "left_address": "0x79BD4",
+      "right_address": "0x79D4C",
+      "body_sha256": "17d9c71a02c9f100da6e0f46c26a7ed8d4a5fc2c707a53d9513ea9004bb58ba6",
+      "size": 48,
+      "left_proposed_name": "diag_monitor_mature_bank02_rec03",
+      "right_proposed_name": "diag_monitor_mature_bank02_rec03"
+    },
+    {
+      "left_address": "0x79B78",
+      "right_address": "0x79CF0",
+      "body_sha256": "3610e64324338700d71d766bf0ffcb775443c4e3ef2acbe4e61fea325bcc1935",
+      "size": 46,
+      "left_proposed_name": "diag_monitor_mature_bank02_rec01",
+      "right_proposed_name": "diag_monitor_mature_bank02_rec01"
+    },
+    {
+      "left_address": "0x79C94",
+      "right_address": "0x79E0C",
+      "body_sha256": "44908496c7452c938d2a02ee7752558764fc199479b82cac38eadbb004070918",
+      "size": 48,
+      "left_proposed_name": "diag_monitor_mature_bank02_rec07",
+      "right_proposed_name": "diag_monitor_mature_bank02_rec07"
+    },
+    {
+      "left_address": "0x79BA6",
+      "right_address": "0x79D1E",
+      "body_sha256": "497b73b2fb6273c02c8dd1b82fed53f0bff53f6079f141942f40901655de0590",
+      "size": 46,
+      "left_proposed_name": "diag_monitor_mature_bank02_rec02",
+      "right_proposed_name": "diag_monitor_mature_bank02_rec02"
+    },
+    {
+      "left_address": "0x798C0",
+      "right_address": "0x79A38",
+      "body_sha256": "4cc80c49aaae427822d27eebc4c136f8c63497e9dd227ea48da92e71bfd5a62f",
+      "size": 48,
+      "left_proposed_name": "diag_monitor_mature_bank01_rec05",
+      "right_proposed_name": "diag_monitor_mature_bank01_rec05"
+    },
+    {
+      "left_address": "0x798F0",
+      "right_address": "0x79A68",
+      "body_sha256": "6d4a537a45bdda0efd5a4077f9522634da0aa18e5343fb751a14848911f2e2c9",
+      "size": 48,
+      "left_proposed_name": "diag_monitor_mature_bank01_rec06",
+      "right_proposed_name": "diag_monitor_mature_bank01_rec06"
+    },
+    {
+      "left_address": "0x79950",
+      "right_address": "0x79AC8",
+      "body_sha256": "87b656d70b9b506de7fac78eedc35f8a912347994c6544eb714c2db0e493ddab",
+      "size": 48,
+      "left_proposed_name": "diag_monitor_mature_bank01_rec08",
+      "right_proposed_name": "diag_monitor_mature_bank01_rec08"
+    },
+    {
+      "left_address": "0x799B0",
+      "right_address": "0x79B28",
+      "body_sha256": "8e063ef2b7eb617501eed02d6db58e28d4281bdcc3100a65bcb89d48d9fc5e41",
+      "size": 48,
+      "left_proposed_name": "diag_monitor_mature_bank01_rec0A",
+      "right_proposed_name": "diag_monitor_mature_bank01_rec0A"
+    },
+    {
+      "left_address": "0x79980",
+      "right_address": "0x79AF8",
+      "body_sha256": "96cc90edacd30d3f70acf6bf5287e5d521e1a30b99db4c1a730ab5f6faca1dd4",
+      "size": 48,
+      "left_proposed_name": "diag_monitor_mature_bank01_rec09",
+      "right_proposed_name": "diag_monitor_mature_bank01_rec09"
+    },
+    {
+      "left_address": "0x79A40",
+      "right_address": "0x79BB8",
+      "body_sha256": "b0a0e901491db4f97260bcf23bcffe025115c60d8bed6df5ce9260b7783a603c",
+      "size": 48,
+      "left_proposed_name": "diag_monitor_mature_bank01_rec0D",
+      "right_proposed_name": "diag_monitor_mature_bank01_rec0D"
+    },
+    {
+      "left_address": "0x79C04",
+      "right_address": "0x79D7C",
+      "body_sha256": "ba0deebad7bdbc2a8284a1643fddd47880f605b34a95f441ac4406973713a39f",
+      "size": 48,
+      "left_proposed_name": "diag_monitor_mature_bank02_rec04",
+      "right_proposed_name": "diag_monitor_mature_bank02_rec04"
+    },
+    {
+      "left_address": "0x79CC4",
+      "right_address": "0x79E3C",
+      "body_sha256": "bdcef8bb111ca9a003ffecb6256da40b914ad2297be735185b0dbe71823b7bde",
+      "size": 48,
+      "left_proposed_name": "diag_monitor_mature_bank02_rec08",
+      "right_proposed_name": "diag_monitor_mature_bank02_rec08"
+    },
+    {
+      "left_address": "0x79A10",
+      "right_address": "0x79B88",
+      "body_sha256": "cd23efc50ff567b8c78827f6d6d69aba63a915e59aede4aa28262155a61f0c0c",
+      "size": 48,
+      "left_proposed_name": "diag_monitor_mature_bank01_rec0C",
+      "right_proposed_name": "diag_monitor_mature_bank01_rec0C"
+    },
+    {
+      "left_address": "0x79A70",
+      "right_address": "0x79BE8",
+      "body_sha256": "d3dea574ba1e1fa95c850bfac7cab61e460413a6f8103c47f538270bcbff4d03",
+      "size": 48,
+      "left_proposed_name": "diag_monitor_mature_bank01_rec0F",
+      "right_proposed_name": "diag_monitor_mature_bank01_rec0F"
+    },
+    {
+      "left_address": "0x79890",
+      "right_address": "0x79A08",
+      "body_sha256": "d57c2fc9b19c34677089b3c2a0507ddfb271b6fa0bd59313a40a4b8441938728",
+      "size": 48,
+      "left_proposed_name": "diag_monitor_mature_bank01_rec04",
+      "right_proposed_name": "diag_monitor_mature_bank01_rec04"
+    },
+    {
+      "left_address": "0x799E0",
+      "right_address": "0x79B58",
+      "body_sha256": "dd28e6fd594611c1635af4eeff7bb65920aaa535d95d5a153c0f31e54ce57f35",
+      "size": 48,
+      "left_proposed_name": "diag_monitor_mature_bank01_rec0B",
+      "right_proposed_name": "diag_monitor_mature_bank01_rec0B"
+    },
+    {
+      "left_address": "0x79C34",
+      "right_address": "0x79DAC",
+      "body_sha256": "eca13a48c6628547980e8b3a15ba3d767efdb9d249e28a935edb057f486af554",
+      "size": 48,
+      "left_proposed_name": "diag_monitor_mature_bank02_rec05",
+      "right_proposed_name": "diag_monitor_mature_bank02_rec05"
+    },
+    {
+      "left_address": "0x79B4A",
+      "right_address": "0x79CC2",
+      "body_sha256": "ee461c99027d3a71cb299e7c3c9b4ffdd12b65d892b87d3f5b18b72e1e206d51",
+      "size": 46,
+      "left_proposed_name": "diag_monitor_mature_bank02_rec00",
+      "right_proposed_name": "diag_monitor_mature_bank02_rec00"
+    },
+    {
+      "left_address": "0x79920",
+      "right_address": "0x79A98",
+      "body_sha256": "f209a70ca33b57074511c5ffe9d8f9e89d97cca5a41c792bd8e6ac1fe8778e88",
+      "size": 48,
+      "left_proposed_name": "diag_monitor_mature_bank01_rec07",
+      "right_proposed_name": "diag_monitor_mature_bank01_rec07"
+    }
+  ],
+  "disagreements": []
+}

@@ -25,6 +25,22 @@ namespace st::devices::ets {
 
 namespace {
 
+bool environment_flag_enabled(char const *name) noexcept {
+#ifdef _WIN32
+    char *value = nullptr;
+    std::size_t value_size = 0;
+    if (_dupenv_s(&value, &value_size, name) != 0 || value == nullptr) {
+        return false;
+    }
+    bool const enabled = std::string_view{value} == "1";
+    std::free(value);
+    return enabled;
+#else
+    char const *value = std::getenv(name);
+    return value != nullptr && std::string_view{value} == "1";
+#endif
+}
+
 // Strip a leading '/' from an AP-vault path. For cmd 0x22 (PutFile)
 // and cmd 0x25 (RemoveFile) the AP firmware expects the request
 // VaultFileMetadata.path to be the full destination relative to the vault
@@ -53,8 +69,7 @@ std::string strip_leading_slash(std::string_view s) {
 bool readfile_drain_mode_enabled() noexcept {
     static int cached = -1;
     if (cached == -1) {
-        char const *v = std::getenv("ST_ETS_READFILE_DRAIN_MODE");
-        cached = (v != nullptr && std::string{v} == "1") ? 1 : 0;
+        cached = environment_flag_enabled("ST_ETS_READFILE_DRAIN_MODE") ? 1 : 0;
     }
     return cached == 1;
 }
@@ -74,8 +89,7 @@ bool ap3_diagnostic_cmds_enabled() noexcept {
     // hot-path cost of a single getenv per gated call is negligible
     // (these are not in the inner loop of any throughput-sensitive
     // path).
-    char const *v = std::getenv("ST_ETS_ENABLE_DIAGNOSTIC_CMDS");
-    return v != nullptr && std::string{v} == "1";
+    return environment_flag_enabled("ST_ETS_ENABLE_DIAGNOSTIC_CMDS");
 }
 
 // Build + ship a packet bypassing the codec-level block list. Only
@@ -506,7 +520,7 @@ Result<std::vector<std::uint8_t>> Client::receive_packet_body() {
             }
             if (all_ascii_digits && !body_span.empty() &&
                 body_span.size() <= 3 && cmd_decoded <= 255) {
-                char buf[96];
+                char buf[160];
                 (void)std::snprintf(buf, sizeof(buf),
                                     " (default-handler error response — cmd "
                                     "0x%02X is not implemented in this "

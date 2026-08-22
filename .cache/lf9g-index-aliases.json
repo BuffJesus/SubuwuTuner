@@ -1,0 +1,56 @@
+{
+  "schema": "subuwutuner.rom-pointer-aliases.v1",
+  "targets": {
+    "0xFFF89198": {
+      "literal_count": 3,
+      "aliases": [
+        {
+          "literal_address": "0x7D4E4",
+          "references": [
+            {
+              "alias": "PTR_DAT_0007d4e4",
+              "function": "FUN_0007d3ba",
+              "address": "0x7D3BA",
+              "file": "decomp_LF9G003T_040000.txt",
+              "reference_count": 1,
+              "lines": [
+                4317
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x7D798",
+          "references": [
+            {
+              "alias": "PTR_DAT_0007d798",
+              "function": "FUN_0007d3ba",
+              "address": "0x7D3BA",
+              "file": "decomp_LF9G003T_040000.txt",
+              "reference_count": 2,
+              "lines": [
+                4342,
+                4349
+              ]
+            }
+          ]
+        },
+        {
+          "literal_address": "0x917C0",
+          "references": [
+            {
+              "alias": "PTR_DAT_000917c0",
+              "function": "sensor_read_scale_wordidx",
+              "address": "0x916FC",
+              "file": "decomp_LF9G003T_080000.txt",
+              "reference_count": 1,
+              "lines": [
+                11796
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

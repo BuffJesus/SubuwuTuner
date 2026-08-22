@@ -171,3 +171,7 @@ tools/STOCK-VALIDATION-FLOW.txt
 # Sources are the loose `definitions/<platform>/*.toml` files; archives are
 # derived install artifacts shipped to end users (~6 MB total vs ~71 MB loose).
 definitions/_archives/
+
+# Local docs snapshot archives (backup artifacts, not source)
+docs.zip
+docs-*.zip

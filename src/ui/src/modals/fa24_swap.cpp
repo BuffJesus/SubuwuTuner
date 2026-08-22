@@ -5,7 +5,7 @@
 // swap into a VA WRX. Opt-in entry point from the Welcome panel's
 // "Common workflows" card (per pack-side [[workflow]] declaration).
 //
-// Why a dedicated modal: the FA24 swap touches 4 calibration tables
+// Why a dedicated modal: the FA24 swap touches 5 calibration tables
 // out of ~200 in the LF79101P/LF79103P/LF9L000E packs. A user opening
 // the table editor cold has no way to know which 4 matter or what to
 // set them to. The modal collapses the decision down to two picks
@@ -61,6 +61,7 @@
 #include <imgui.h>
 #include <nfd.hpp>
 
+#include <algorithm>
 #include <array>
 #include <filesystem>
 #include <span>
@@ -78,6 +79,18 @@ constexpr char const *kStepNames[kStepCount] = {"Cam strategy", "Basemap", "Revi
 // the pack TOML). Used to look up which pack declares FA24 swap
 // support and to drive the disabled-state gating on the welcome card.
 constexpr char const *kWorkflowId = "fa24_swap";
+
+// This list is the pack-contract surface for the modal below. Keep it
+// separate from kWorkflowTables because the pack gate is declared before
+// the table-operation metadata, but require an exact match so a TOML pack
+// cannot advertise one table while the UI edits another.
+constexpr std::array<char const *, 5> kFa24WorkflowTableIds = {{
+    "engine_displacement",
+    "fuel_timing_hpfp_phase_transfer_curve",
+    "avcs_intake_barometric_multiplier_low_intake_cam_target_tgv_closed",
+    "avcs_intake_barometric_multiplier_high_intake_cam_target_tgv_closed",
+    "fuel_injectors_pulse_injector_mult_table",
+}};
 
 // Cam-strategy enum. The chosen strategy determines whether the
 // software-side fix runs (Roberto + RS Motors paths skip it entirely
@@ -141,15 +154,25 @@ bool pack_supports_fa24_swap(AppState const &state) {
     if (!state.project.has_value()) {
         return false;
     }
-    // Pack must declare the workflow via a [[workflow]] block.
-    // Definition::supports_workflow validates each required_tables id
-    // resolves to a present table. This is the only gate — there was
-    // a transitional hardcoded table-presence fallback until 2026-06-07
-    // that masked packs with the required IDs but unverified data
-    // (lf75404h's HPFP cluster failed analyst validation while still
-    // matching by name, for example). Dropping the fallback aligns
-    // eligibility with explicit pack-author opt-in.
-    return state.project->definition().supports_workflow("fa24_swap");
+    // Pack must declare the workflow via a [[workflow]] block, resolve all
+    // required table IDs, and match the exact table set the modal applies.
+    // The last condition prevents a stale pack declaration from silently
+    // gating a different edit recipe.
+    auto const &definition = state.project->definition();
+    if (!definition.supports_workflow(kWorkflowId)) {
+        return false;
+    }
+    auto const *workflow = definition.find_workflow(kWorkflowId);
+    if (workflow == nullptr || workflow->required_tables.size() != kFa24WorkflowTableIds.size()) {
+        return false;
+    }
+    for (auto const *expected : kFa24WorkflowTableIds) {
+        if (std::find(workflow->required_tables.begin(), workflow->required_tables.end(), expected) ==
+            workflow->required_tables.end()) {
+            return false;
+        }
+    }
+    return true;
 }
 
 bool fa24_swap_active(AppState const &state) {

@@ -1,0 +1,44 @@
+{
+  "schema": "subuwutuner.rom-semantic-evidence.v1",
+  "family": "LF9C/D/G/L",
+  "image_base": "0x6000",
+  "policy": {
+    "reviewed_proposals": true,
+    "automatic_application_authorized": false
+  },
+  "candidates": [
+    {
+      "proposed_name": "udiv64_by_64_quotient32_sat",
+      "size": 136,
+      "body_sha256": "8bfc643cc5dfb11b590aa2562a4663ff5897d4eef7d759d7cf3b18c8b6c8f7aa",
+      "locations": [
+        {"cid": "LF9C102P", "address": "0x6C50"},
+        {"cid": "LF9D012H", "address": "0x6C50"},
+        {"cid": "LF9G003T", "address": "0x6C50"},
+        {"cid": "LF9L000E", "address": "0x6C50"}
+      ]
+    },
+    {
+      "proposed_name": "umul32_wide_split",
+      "size": 90,
+      "body_sha256": "8dad6a403ad685897010a59ec8a06229058aff53d6b8befba6f38aef05a377a2",
+      "locations": [
+        {"cid": "LF9C102P", "address": "0x6CDC"},
+        {"cid": "LF9D012H", "address": "0x6CDC"},
+        {"cid": "LF9G003T", "address": "0x6CDC"},
+        {"cid": "LF9L000E", "address": "0x6CDC"}
+      ]
+    },
+    {
+      "proposed_name": "udiv64_by_u32_wrapper",
+      "size": 24,
+      "body_sha256": "e9fb0efb88fdffa3b76b9f6762cf84ae07a2125f3483c9ccdff82ceead3f6eea",
+      "locations": [
+        {"cid": "LF9C102P", "address": "0x1E637C"},
+        {"cid": "LF9D012H", "address": "0x1F330C"},
+        {"cid": "LF9G003T", "address": "0x20964C"},
+        {"cid": "LF9L000E", "address": "0x212A88"}
+      ]
+    }
+  ]
+}

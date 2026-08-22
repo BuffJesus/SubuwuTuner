@@ -124,7 +124,9 @@ void render_knock_dashboard_panel(AppState &state) {
                     for (auto const &h : headers) {
                         std::string lower = h;
                         std::transform(lower.begin(), lower.end(), lower.begin(),
-                                       [](unsigned char c) { return std::tolower(c); });
+                                       [](unsigned char c) {
+                                           return static_cast<char>(std::tolower(c));
+                                       });
                         if (pred(lower))
                             return h.c_str();
                     }

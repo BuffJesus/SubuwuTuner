@@ -25,7 +25,10 @@ display_name    = "FA24 swap (VA WRX)"
 modal           = "fa24_swap"
 required_tables = [
     "engine_displacement",
-    "fuel_timing_hpfp_base_offset",
+    # Keep this list in sync with fa24_swap.cpp. The Base Offset remains
+    # available as a separately reviewed calibration, but the current modal
+    # applies the resolved 16-element phase-transfer curve.
+    "fuel_timing_hpfp_phase_transfer_curve",
     "avcs_intake_barometric_multiplier_low_intake_cam_target_tgv_closed",
     "avcs_intake_barometric_multiplier_high_intake_cam_target_tgv_closed",
     "fuel_injectors_pulse_injector_mult_table",

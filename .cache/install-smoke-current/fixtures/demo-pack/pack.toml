@@ -1,0 +1,40 @@
+[pack]
+schema_version = 1
+id             = "demo-va-wrx-mt"
+display_name   = "Demo VA WRX MT (synthetic)"
+platform       = "subaru.va.wrx"
+transmission   = "manual"
+years          = [2019, 2020, 2021]
+endianness     = "big"
+rom_size_bytes = 1024
+checksum_type  = "subaru_std"  # post-write checksum kind; see docs/11
+license        = "Apache-2.0"
+
+[[identification]]
+name        = "Demo CID AS80U"
+cid_address = 0x0008
+cid_length  = 8
+cid_match   = "AS80U   "
+ecu_part    = "22765-AS80U"
+
+# Writable-region declarations are required for the codegen address gate
+# (docs/16 §"Safety" #6) to admit any compiled .stmod patch against this
+# pack. The demo pack's regions are illustrative — real VA-WRX packs
+# mirror the actual ECU flash bank layout. Without this declaration the
+# address gate fails closed and the sample .stmod files (clutch-kill,
+# vvt-override-demo, fa24-hpfp-clamp, ...) reject at compile time with
+# "pack has no [[writable_region]] declared."
+
+[[writable_region]]
+name        = "demo-calibration"
+kind        = "calibration"
+address     = 0x000A0000
+length      = 0x00020000
+description = "Synthetic 128 KiB calibration region for sample-pack codegen testing."
+
+[[writable_region]]
+name        = "demo-code"
+kind        = "code"
+address     = 0x000C0000
+length      = 0x00010000
+description = "Synthetic 64 KiB code region where compiled .stmod patches land."

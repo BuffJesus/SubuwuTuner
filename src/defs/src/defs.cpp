@@ -535,6 +535,57 @@ Result<WritableRegion> parse_writable_region(toml::table const &t) {
     return w;
 }
 
+Result<CalibrationRegion> parse_calibration_region(toml::table const &t) {
+    CalibrationRegion r;
+    if (auto const v = t["name"].value<std::string>(); v.has_value() && !v->empty()) {
+        r.name = *v;
+    } else {
+        return failure(ErrorCode::ParseError,
+                       "[[calibration_region]] missing name" + source_suffix(t));
+    }
+    if (auto const v = t["cid"].value<std::string>(); v.has_value() && !v->empty()) {
+        r.cid = *v;
+    } else {
+        return failure(ErrorCode::ParseError,
+                       "[[calibration_region]] '" + r.name +
+                           "' missing exact cid" + source_suffix(t));
+    }
+    if (auto const v = t["provenance"].value<std::string>(); v.has_value() && !v->empty()) {
+        r.provenance = *v;
+    } else {
+        return failure(ErrorCode::ParseError,
+                       "[[calibration_region]] '" + r.name +
+                           "' missing provenance" + source_suffix(t));
+    }
+    r.status = optional_value<std::string>(t, "status", "candidate");
+    if (r.status != "candidate" && r.status != "approved") {
+        return failure(ErrorCode::ParseError,
+                       "[[calibration_region]] '" + r.name +
+                           "' status must be candidate or approved" + source_suffix(t));
+    }
+    if (auto const v = t["address"].value<std::int64_t>(); v.has_value() && *v >= 0) {
+        r.address = static_cast<std::size_t>(*v);
+    } else {
+        return failure(ErrorCode::ParseError,
+                       "[[calibration_region]] '" + r.name +
+                           "' address must be a non-negative integer" + source_suffix(t));
+    }
+    if (auto const v = t["length"].value<std::int64_t>(); v.has_value() && *v > 0) {
+        r.length = static_cast<std::size_t>(*v);
+    } else {
+        return failure(ErrorCode::ParseError,
+                       "[[calibration_region]] '" + r.name +
+                           "' length must be a positive integer" + source_suffix(t));
+    }
+    if (r.address > std::numeric_limits<std::size_t>::max() - r.length) {
+        return failure(ErrorCode::ParseError,
+                       "[[calibration_region]] '" + r.name +
+                           "' address + length overflows the address space" + source_suffix(t));
+    }
+    r.description = optional_value<std::string>(t, "description", {});
+    return r;
+}
+
 Result<Primitive> parse_primitive(toml::table const &t) {
     Primitive p;
     if (auto const v = t["id"].value<std::string>(); v.has_value() && !v->empty()) {
@@ -1029,6 +1080,11 @@ public:
             !r.has_value()) {
             return failure(r.error());
         }
+        if (auto r = visit_array("calibration_region", parse_calibration_region,
+                                def.calibration_regions_);
+            !r.has_value()) {
+            return failure(r.error());
+        }
         if (auto r = visit_array("workflow", parse_workflow, def.workflows_); !r.has_value()) {
             return failure(r.error());
         }
@@ -1081,6 +1137,20 @@ public:
                                    [&](WritableRegion const &x) { return x.name == el.name; });
             if (it == parent.writable_regions_.end()) {
                 parent.writable_regions_.push_back(std::move(el));
+            } else {
+                *it = std::move(el);
+            }
+        }
+        // Calibration regions are keyed by exact CID + name. A child pack
+        // may refine one CID's range without changing another CID's entry.
+        for (auto &el : child.calibration_regions_) {
+            auto it = std::find_if(parent.calibration_regions_.begin(),
+                                   parent.calibration_regions_.end(),
+                                   [&](CalibrationRegion const &x) {
+                                       return x.cid == el.cid && x.name == el.name;
+                                   });
+            if (it == parent.calibration_regions_.end()) {
+                parent.calibration_regions_.push_back(std::move(el));
             } else {
                 *it = std::move(el);
             }
@@ -1505,6 +1575,27 @@ Status Definition::validate() const {
             note("dtc '" + d.code + "' byte_offset " + std::to_string(d.byte_offset) +
                  " is outside bitmap '" + bm->id +
                  "' (length_bytes=" + std::to_string(bm->length_bytes) + ")");
+        }
+    }
+    for (auto const &r : calibration_regions_) {
+        if (r.cid.empty()) {
+            note("calibration_region '" + r.name + "' has no exact cid");
+        }
+        if (r.provenance.empty()) {
+            note("calibration_region '" + r.name + "' has no provenance");
+        }
+        if (!fits(r.address, r.length)) {
+            note("calibration_region '" + r.name + "' extends past rom_size_bytes");
+        }
+    }
+    for (std::size_t i = 0; i < calibration_regions_.size(); ++i) {
+        for (std::size_t j = i + 1; j < calibration_regions_.size(); ++j) {
+            auto const &lhs = calibration_regions_[i];
+            auto const &rhs = calibration_regions_[j];
+            if (lhs.cid == rhs.cid && lhs.name == rhs.name) {
+                note("calibration_region '" + lhs.name + "' for cid '" +
+                     lhs.cid + "' is defined more than once");
+            }
         }
     }
 
@@ -1955,7 +2046,7 @@ std::optional<Definition::MatchInfo> Definition::match_info(Rom const &rom) cons
                                        haystack->size()};
             auto const pos = hay.find(id.cid_match);
             if (pos != std::string_view::npos) {
-                return MatchInfo{id.name, pos, /*scanned=*/true};
+                return MatchInfo{id.name, id.cid_match, pos, /*scanned=*/true};
             }
             continue;
         }
@@ -1965,10 +2056,24 @@ std::optional<Definition::MatchInfo> Definition::match_info(Rom const &rom) cons
         }
         std::string_view const got{reinterpret_cast<char const *>(slice->data()), slice->size()};
         if (got == id.cid_match) {
-            return MatchInfo{id.name, id.cid_address, /*scanned=*/false};
+            return MatchInfo{id.name, id.cid_match, id.cid_address, /*scanned=*/false};
         }
     }
     return std::nullopt;
+}
+
+std::vector<CalibrationRegion const *>
+Definition::approved_calibration_regions(std::string_view cid) const {
+    std::vector<CalibrationRegion const *> result;
+    if (cid.empty()) {
+        return result;
+    }
+    for (auto const &region : calibration_regions_) {
+        if (region.cid == cid && region.status == "approved") {
+            result.push_back(&region);
+        }
+    }
+    return result;
 }
 
 std::optional<std::string> Definition::matches(Rom const &rom) const {

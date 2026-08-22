@@ -115,6 +115,18 @@ TEST_CASE("Atlas safety_pair round-trip", "[library][atlas]") {
     CHECK(p->rhs_patterns.size() == 1);
 }
 
+TEST_CASE("Atlas resolves safety pairs by table display name", "[library][atlas]") {
+    auto const r = st::library::Atlas::load_from_string(kMinimalAtlas);
+    REQUIRE(r.has_value());
+    auto const boost = r->safety_pairs_for_table("Boost Target Main - High Wastegate");
+    REQUIRE(boost.size() == 1);
+    CHECK(boost[0]->id == "boost_target_wastegate");
+    auto const duty = r->safety_pairs_for_table("Wastegate Duty Maximum");
+    REQUIRE(duty.size() == 1);
+    CHECK(duty[0]->severity == "high");
+    CHECK(r->safety_pairs_for_table("Coolant Temperature Compensation").empty());
+}
+
 TEST_CASE("Atlas anchor_for_offset finds covering anchor",
           "[library][atlas]") {
     auto const r = st::library::Atlas::load_from_string(kMinimalAtlas);

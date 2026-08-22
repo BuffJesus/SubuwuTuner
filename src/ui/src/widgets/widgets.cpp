@@ -384,7 +384,7 @@ void ensure_glossary_loaded(AppState &state) {
         }
         std::string lower = term;
         std::transform(lower.begin(), lower.end(), lower.begin(),
-                       [](unsigned char c) { return std::tolower(c); });
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         if (lower == "term" || lower == "meaning" || term.empty() || defn.empty()) {
             continue;
         }

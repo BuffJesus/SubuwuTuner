@@ -1373,6 +1373,25 @@ void render_table_view(AppState &state, Fonts const &fonts) {
                 // Tuner-cluster history — who tunes this. Lets the
                 // user see "this is COBB territory" vs "Fehr-style"
                 // before deciding what value to pick.
+                auto const safety_pairs = atlas->safety_pairs_for_table(at->display_name);
+                if (!safety_pairs.empty()) {
+                    ImGui::TextDisabled("Safety pairs");
+                    ImGui::SameLine(160.0f);
+                    ImGui::BeginGroup();
+                    for (auto const *pair : safety_pairs) {
+                        ImVec4 const severity_color = pair->severity == "high"
+                                                          ? chip_fg_danger()
+                                                          : pair->severity == "med"
+                                                                ? chip_fg_caution()
+                                                                : chip_fg_info();
+                        ImGui::TextColored(severity_color, "%s [%s]", pair->title.c_str(),
+                                           pair->severity.c_str());
+                        ImGui::Indent();
+                        ImGui::TextWrapped("%s", pair->rationale.c_str());
+                        ImGui::Unindent();
+                    }
+                    ImGui::EndGroup();
+                }
                 if (!at->clusters.empty()) {
                     ImGui::TextDisabled("Tuners touch");
                     ImGui::SameLine(160.0f);

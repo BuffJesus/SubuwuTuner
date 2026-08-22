@@ -1,0 +1,1196 @@
+{
+  "schema": "subuwutuner.rom-corpus-research-queue.v1",
+  "corpus_root": "fixtures\\private\\plaintext_corpus",
+  "definitions_root": "definitions",
+  "decompile_root": "D:\\Subuwu\\findings\\decompile",
+  "definition_count": 714,
+  "matched_image_count": 126,
+  "unmatched_image_count": 4230,
+  "unique_cid_count": 28,
+  "cids": [
+    {
+      "cid": "A2TB001N",
+      "family": "A2TB",
+      "image_count": 5,
+      "sizes": {
+        "1048576": 5
+      },
+      "definition": "definitions\\ecuparams\\a2tb001n.toml",
+      "artifacts": {
+        "folder": "D:\\Subuwu\\findings\\decompile\\a2tb001n",
+        "folder_exists": false,
+        "function_index_named": false,
+        "calibration_index": false,
+        "decomp_windows": 0
+      },
+      "files": [
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A2TB001N.1.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A2TB001N.2.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A2TB001N.3.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A2TB001N.4.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A2TB001N.bin",
+          "size": 1048576
+        }
+      ]
+    },
+    {
+      "cid": "A2TB100K",
+      "family": "A2TB",
+      "image_count": 1,
+      "sizes": {
+        "1048576": 1
+      },
+      "definition": "definitions\\ecuparams\\a2tb100k.toml",
+      "artifacts": {
+        "folder": "D:\\Subuwu\\findings\\decompile\\a2tb100k",
+        "folder_exists": false,
+        "function_index_named": false,
+        "calibration_index": false,
+        "decomp_windows": 0
+      },
+      "files": [
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A2TB100K.bin",
+          "size": 1048576
+        }
+      ]
+    },
+    {
+      "cid": "A2WC522S",
+      "family": "A2WC",
+      "image_count": 1,
+      "sizes": {
+        "1048576": 1
+      },
+      "definition": "definitions\\ecuparams\\a2wc522s.toml",
+      "artifacts": {
+        "folder": "D:\\Subuwu\\findings\\decompile\\a2wc522s",
+        "folder_exists": false,
+        "function_index_named": false,
+        "calibration_index": false,
+        "decomp_windows": 0
+      },
+      "files": [
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A2WC522S.bin",
+          "size": 1048576
+        }
+      ]
+    },
+    {
+      "cid": "A2WF101K",
+      "family": "A2WF",
+      "image_count": 1,
+      "sizes": {
+        "1048576": 1
+      },
+      "definition": "definitions\\baja\\a2wf101k.toml",
+      "artifacts": {
+        "folder": "D:\\Subuwu\\findings\\decompile\\a2wf101k",
+        "folder_exists": false,
+        "function_index_named": false,
+        "calibration_index": false,
+        "decomp_windows": 0
+      },
+      "files": [
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A2WF101K.bin",
+          "size": 1048576
+        }
+      ]
+    },
+    {
+      "cid": "A2ZJ201D",
+      "family": "A2ZJ",
+      "image_count": 1,
+      "sizes": {
+        "524288": 1
+      },
+      "definition": "definitions\\ecuparams\\a2zj201d.toml",
+      "artifacts": {
+        "folder": "D:\\Subuwu\\findings\\decompile\\a2zj201d",
+        "folder_exists": false,
+        "function_index_named": false,
+        "calibration_index": false,
+        "decomp_windows": 0
+      },
+      "files": [
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A2ZJ201D.bin",
+          "size": 524288
+        }
+      ]
+    },
+    {
+      "cid": "A2ZJ500I",
+      "family": "A2ZJ",
+      "image_count": 1,
+      "sizes": {
+        "524288": 1
+      },
+      "definition": "definitions\\ecuparams\\a2zj500i.toml",
+      "artifacts": {
+        "folder": "D:\\Subuwu\\findings\\decompile\\a2zj500i",
+        "folder_exists": false,
+        "function_index_named": false,
+        "calibration_index": false,
+        "decomp_windows": 0
+      },
+      "files": [
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A2ZJ500I.bin",
+          "size": 524288
+        }
+      ]
+    },
+    {
+      "cid": "A2ZJ500M",
+      "family": "A2ZJ",
+      "image_count": 1,
+      "sizes": {
+        "524288": 1
+      },
+      "definition": "definitions\\ecuparams\\a2zj500m.toml",
+      "artifacts": {
+        "folder": "D:\\Subuwu\\findings\\decompile\\a2zj500m",
+        "folder_exists": false,
+        "function_index_named": false,
+        "calibration_index": false,
+        "decomp_windows": 0
+      },
+      "files": [
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A2ZJ500M.bin",
+          "size": 524288
+        }
+      ]
+    },
+    {
+      "cid": "A4TF800F",
+      "family": "A4TF",
+      "image_count": 1,
+      "sizes": {
+        "163840": 1
+      },
+      "definition": "definitions\\ecuparams\\a4tf800f.toml",
+      "artifacts": {
+        "folder": "D:\\Subuwu\\findings\\decompile\\a4tf800f",
+        "folder_exists": false,
+        "function_index_named": false,
+        "calibration_index": false,
+        "decomp_windows": 0
+      },
+      "files": [
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A4TF800F.bin",
+          "size": 163840
+        }
+      ]
+    },
+    {
+      "cid": "A4TF810F",
+      "family": "A4TF",
+      "image_count": 5,
+      "sizes": {
+        "163840": 5
+      },
+      "definition": "definitions\\ecuparams\\a4tf810f.toml",
+      "artifacts": {
+        "folder": "D:\\Subuwu\\findings\\decompile\\a4tf810f",
+        "folder_exists": false,
+        "function_index_named": false,
+        "calibration_index": false,
+        "decomp_windows": 0
+      },
+      "files": [
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A4TF810F.1.bin",
+          "size": 163840
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A4TF810F.2.bin",
+          "size": 163840
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A4TF810F.3.bin",
+          "size": 163840
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A4TF810F.4.bin",
+          "size": 163840
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A4TF810F.bin",
+          "size": 163840
+        }
+      ]
+    },
+    {
+      "cid": "A4TH100H",
+      "family": "A4TH",
+      "image_count": 3,
+      "sizes": {
+        "163840": 3
+      },
+      "definition": "definitions\\ecuparams\\a4th100h.toml",
+      "artifacts": {
+        "folder": "D:\\Subuwu\\findings\\decompile\\a4th100h",
+        "folder_exists": false,
+        "function_index_named": false,
+        "calibration_index": false,
+        "decomp_windows": 0
+      },
+      "files": [
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A4TH100H.1.bin",
+          "size": 163840
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A4TH100H.2.bin",
+          "size": 163840
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A4TH100H.bin",
+          "size": 163840
+        }
+      ]
+    },
+    {
+      "cid": "A8DH101I",
+      "family": "A8DH",
+      "image_count": 24,
+      "sizes": {
+        "1048576": 24
+      },
+      "definition": "definitions\\ecuparams\\a8dh101i.toml",
+      "artifacts": {
+        "folder": "D:\\Subuwu\\findings\\decompile\\a8dh101i",
+        "folder_exists": true,
+        "function_index_named": true,
+        "calibration_index": false,
+        "decomp_windows": 3
+      },
+      "files": [
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A8DH101I.1.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A8DH101I.10.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A8DH101I.11.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A8DH101I.12.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A8DH101I.13.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A8DH101I.14.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A8DH101I.15.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A8DH101I.16.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A8DH101I.17.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A8DH101I.18.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A8DH101I.19.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A8DH101I.2.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A8DH101I.20.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A8DH101I.21.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A8DH101I.22.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A8DH101I.23.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A8DH101I.3.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A8DH101I.4.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A8DH101I.5.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A8DH101I.6.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A8DH101I.7.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A8DH101I.8.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A8DH101I.9.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A8DH101I.bin",
+          "size": 1048576
+        }
+      ]
+    },
+    {
+      "cid": "A8DH201X",
+      "family": "A8DH",
+      "image_count": 1,
+      "sizes": {
+        "1048576": 1
+      },
+      "definition": "definitions\\ecuparams\\a8dh201x.toml",
+      "artifacts": {
+        "folder": "D:\\Subuwu\\findings\\decompile\\a8dh201x",
+        "folder_exists": true,
+        "function_index_named": true,
+        "calibration_index": false,
+        "decomp_windows": 3
+      },
+      "files": [
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A8DH201X.bin",
+          "size": 1048576
+        }
+      ]
+    },
+    {
+      "cid": "A8DH202X",
+      "family": "A8DH",
+      "image_count": 1,
+      "sizes": {
+        "1048576": 1
+      },
+      "definition": "definitions\\ecuparams\\a8dh202x.toml",
+      "artifacts": {
+        "folder": "D:\\Subuwu\\findings\\decompile\\a8dh202x",
+        "folder_exists": true,
+        "function_index_named": true,
+        "calibration_index": false,
+        "decomp_windows": 3
+      },
+      "files": [
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\A8DH202X.bin",
+          "size": 1048576
+        }
+      ]
+    },
+    {
+      "cid": "AZ1G101M",
+      "family": "AZ1G",
+      "image_count": 1,
+      "sizes": {
+        "1048576": 1
+      },
+      "definition": "definitions\\ecuparams\\az1g101m.toml",
+      "artifacts": {
+        "folder": "D:\\Subuwu\\findings\\decompile\\az1g101m",
+        "folder_exists": false,
+        "function_index_named": false,
+        "calibration_index": false,
+        "decomp_windows": 0
+      },
+      "files": [
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\AZ1G101M.bin",
+          "size": 1048576
+        }
+      ]
+    },
+    {
+      "cid": "AZ1G202G",
+      "family": "AZ1G",
+      "image_count": 3,
+      "sizes": {
+        "1048576": 3
+      },
+      "definition": "definitions\\ecuparams\\az1g202g.toml",
+      "artifacts": {
+        "folder": "D:\\Subuwu\\findings\\decompile\\az1g202g",
+        "folder_exists": false,
+        "function_index_named": false,
+        "calibration_index": false,
+        "decomp_windows": 0
+      },
+      "files": [
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\AZ1G202G.1.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\AZ1G202G.2.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\AZ1G202G.bin",
+          "size": 1048576
+        }
+      ]
+    },
+    {
+      "cid": "AZ1G300F",
+      "family": "AZ1G",
+      "image_count": 1,
+      "sizes": {
+        "1048576": 1
+      },
+      "definition": "definitions\\ecuparams\\az1g300f.toml",
+      "artifacts": {
+        "folder": "D:\\Subuwu\\findings\\decompile\\az1g300f",
+        "folder_exists": false,
+        "function_index_named": false,
+        "calibration_index": false,
+        "decomp_windows": 0
+      },
+      "files": [
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\AZ1G300F.bin",
+          "size": 1048576
+        }
+      ]
+    },
+    {
+      "cid": "AZ1G401V",
+      "family": "AZ1G",
+      "image_count": 5,
+      "sizes": {
+        "1048576": 5
+      },
+      "definition": "definitions\\ecuparams\\az1g401v.toml",
+      "artifacts": {
+        "folder": "D:\\Subuwu\\findings\\decompile\\az1g401v",
+        "folder_exists": false,
+        "function_index_named": false,
+        "calibration_index": false,
+        "decomp_windows": 0
+      },
+      "files": [
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\AZ1G401V.1.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\AZ1G401V.2.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\AZ1G401V.3.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\AZ1G401V.4.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\AZ1G401V.bin",
+          "size": 1048576
+        }
+      ]
+    },
+    {
+      "cid": "EP5G600A",
+      "family": "EP5G",
+      "image_count": 1,
+      "sizes": {
+        "1048576": 1
+      },
+      "definition": "definitions\\ecuparams\\ep5g600a.toml",
+      "artifacts": {
+        "folder": "D:\\Subuwu\\findings\\decompile\\ep5g600a",
+        "folder_exists": true,
+        "function_index_named": true,
+        "calibration_index": false,
+        "decomp_windows": 3
+      },
+      "files": [
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\EP5G600A.bin",
+          "size": 1048576
+        }
+      ]
+    },
+    {
+      "cid": "EZ1GB20I",
+      "family": "EZ1G",
+      "image_count": 1,
+      "sizes": {
+        "1048576": 1
+      },
+      "definition": "definitions\\forester\\ez1gb20i.toml",
+      "artifacts": {
+        "folder": "D:\\Subuwu\\findings\\decompile\\ez1gb20i",
+        "folder_exists": false,
+        "function_index_named": false,
+        "calibration_index": false,
+        "decomp_windows": 0
+      },
+      "files": [
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\keystream-recovered\\EZ1GB20I_1049600\\EZ1GB20I.bin",
+          "size": 1048576
+        }
+      ]
+    },
+    {
+      "cid": "EZ1GC00C",
+      "family": "EZ1G",
+      "image_count": 7,
+      "sizes": {
+        "1048576": 7
+      },
+      "definition": "definitions\\ecuparams\\ez1gc00c.toml",
+      "artifacts": {
+        "folder": "D:\\Subuwu\\findings\\decompile\\ez1gc00c",
+        "folder_exists": false,
+        "function_index_named": false,
+        "calibration_index": false,
+        "decomp_windows": 0
+      },
+      "files": [
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\EZ1GC00C.1.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\EZ1GC00C.2.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\EZ1GC00C.3.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\EZ1GC00C.4.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\EZ1GC00C.5.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\EZ1GC00C.6.bin",
+          "size": 1048576
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\forum-bins\\EZ1GC00C.bin",
+          "size": 1048576
+        }
+      ]
+    },
+    {
+      "cid": "LF75404H",
+      "family": "LF75",
+      "image_count": 11,
+      "sizes": {
+        "2097152": 11
+      },
+      "definition": "definitions\\impreza\\lf75404h.toml",
+      "artifacts": {
+        "folder": "D:\\Subuwu\\findings\\decompile\\lf75404h",
+        "folder_exists": true,
+        "function_index_named": true,
+        "calibration_index": false,
+        "decomp_windows": 8
+      },
+      "files": [
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\LF75300_family\\LF75404H.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\LF78001_family\\LF75404H.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\LF79100_family\\LF75404H.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\LV9N303_family\\LF75404H.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\PAK_LF75500A\\LF75404H.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\PAK_LF75500G\\LF75404H.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\PAK_LF75600S\\LF75404H.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\PAK_LF78200B\\LF75404H.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\PAK_LF79120P\\LF75404H.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\keystream-recovered\\AV9D100E_2098176\\LF75404H.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\keystream-recovered\\LF76000C_2098176\\LF75404H.bin",
+          "size": 2097152
+        }
+      ]
+    },
+    {
+      "cid": "LF75404S",
+      "family": "LF75",
+      "image_count": 11,
+      "sizes": {
+        "2097152": 11
+      },
+      "definition": "definitions\\impreza\\lf75404s.toml",
+      "artifacts": {
+        "folder": "D:\\Subuwu\\findings\\decompile\\lf75404s",
+        "folder_exists": true,
+        "function_index_named": true,
+        "calibration_index": false,
+        "decomp_windows": 8
+      },
+      "files": [
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\LF75300_family\\LF75404S.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\LF78001_family\\LF75404S.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\LF79100_family\\LF75404S.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\LV9N303_family\\LF75404S.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\PAK_LF75500A\\LF75404S.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\PAK_LF75500G\\LF75404S.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\PAK_LF75600S\\LF75404S.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\PAK_LF78200B\\LF75404S.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\PAK_LF79120P\\LF75404S.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\keystream-recovered\\AV9D100E_2098176\\LF75404S.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\keystream-recovered\\LF76000C_2098176\\LF75404S.bin",
+          "size": 2097152
+        }
+      ]
+    },
+    {
+      "cid": "LF79100P",
+      "family": "LF79",
+      "image_count": 12,
+      "sizes": {
+        "2097152": 12
+      },
+      "definition": "definitions\\impreza\\lf79100p.toml",
+      "artifacts": {
+        "folder": "D:\\Subuwu\\findings\\decompile\\lf79100p",
+        "folder_exists": true,
+        "function_index_named": true,
+        "calibration_index": false,
+        "decomp_windows": 9
+      },
+      "files": [
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\LF75300_family\\LF79100P.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\LF78001_family\\LF79100P.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\LF9C000_family\\LF79100P.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\LV9N303_family\\LF79100P.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\PAK_LF75500A\\LF79100P.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\PAK_LF75500G\\LF79100P.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\PAK_LF75600S\\LF79100P.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\PAK_LF78200B\\LF79100P.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\PAK_LF79120P\\LF79100P.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\PAK_LF9C200B\\LF79100P.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\PAK_LF9C300P\\LF79100P.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\keystream-recovered\\AV9D100E_2098176\\LF79100P.bin",
+          "size": 2097152
+        }
+      ]
+    },
+    {
+      "cid": "LF79101P",
+      "family": "LF79",
+      "image_count": 13,
+      "sizes": {
+        "2097152": 13
+      },
+      "definition": "definitions\\impreza\\lf79101p.toml",
+      "artifacts": {
+        "folder": "D:\\Subuwu\\findings\\decompile\\lf79101p",
+        "folder_exists": true,
+        "function_index_named": true,
+        "calibration_index": false,
+        "decomp_windows": 0
+      },
+      "files": [
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\LF75300_family\\LF79101P.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\LF78001_family\\LF79101P.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\LF79100_family\\LF79101P.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\LF9C000_family\\LF79101P.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\LV9N303_family\\LF79101P.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\PAK_LF75500A\\LF79101P.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\PAK_LF75500G\\LF79101P.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\PAK_LF75600S\\LF79101P.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\PAK_LF78200B\\LF79101P.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\PAK_LF79120P\\LF79101P.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\PAK_LF9C200B\\LF79101P.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\PAK_LF9C300P\\LF79101P.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\keystream-recovered\\AV9D100E_2098176\\LF79101P.bin",
+          "size": 2097152
+        }
+      ]
+    },
+    {
+      "cid": "LF9D012H",
+      "family": "LF9D",
+      "image_count": 1,
+      "sizes": {
+        "2621440": 1
+      },
+      "definition": "definitions\\impreza\\lf9d012h.toml",
+      "artifacts": {
+        "folder": "D:\\Subuwu\\findings\\decompile\\lf9d012h",
+        "folder_exists": true,
+        "function_index_named": true,
+        "calibration_index": false,
+        "decomp_windows": 9
+      },
+      "files": [
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\keystream-recovered\\LF9D000D_2622464\\LF9D012H.bin",
+          "size": 2621440
+        }
+      ]
+    },
+    {
+      "cid": "LF9G003T",
+      "family": "LF9G",
+      "image_count": 6,
+      "sizes": {
+        "2596864": 3,
+        "2621440": 3
+      },
+      "definition": "definitions\\impreza\\lf9g003t.toml",
+      "artifacts": {
+        "folder": "D:\\Subuwu\\findings\\decompile\\lf9g003t",
+        "folder_exists": true,
+        "function_index_named": true,
+        "calibration_index": false,
+        "decomp_windows": 10
+      },
+      "files": [
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\LF9F000R_DIT_VB\\LF9G003T.bin",
+          "size": 2621440
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\PAK_LF9G002S\\LF9G003T.bin",
+          "size": 2596864
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\PAK_LF9L000E\\LF9G003T.bin",
+          "size": 2596864
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\PAK_LT8DB00A\\LF9G003T.bin",
+          "size": 2596864
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\keystream-recovered\\LF9F000R_2622464\\LF9G003T.bin",
+          "size": 2621440
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\keystream-recovered\\LF9F000R_DIT_VB\\LF9G003T.bin",
+          "size": 2621440
+        }
+      ]
+    },
+    {
+      "cid": "LF9L000E",
+      "family": "LF9L",
+      "image_count": 5,
+      "sizes": {
+        "2596864": 2,
+        "2621440": 3
+      },
+      "definition": "definitions\\impreza\\lf9l000e.toml",
+      "artifacts": {
+        "folder": "D:\\Subuwu\\findings\\decompile\\lf9l000e",
+        "folder_exists": true,
+        "function_index_named": true,
+        "calibration_index": false,
+        "decomp_windows": 10
+      },
+      "files": [
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\LF9F000R_DIT_VB\\LF9L000E.bin",
+          "size": 2621440
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\PAK_LF9G002S\\LF9L000E.bin",
+          "size": 2596864
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\PAK_LT8DB00A\\LF9L000E.bin",
+          "size": 2596864
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\keystream-recovered\\LF9F000R_2622464\\LF9L000E.bin",
+          "size": 2621440
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\keystream-recovered\\LF9F000R_DIT_VB\\LF9L000E.bin",
+          "size": 2621440
+        }
+      ]
+    },
+    {
+      "cid": "LV9N001D",
+      "family": "LV9N",
+      "image_count": 2,
+      "sizes": {
+        "2097152": 2
+      },
+      "definition": "definitions\\impreza\\lv9n001d.toml",
+      "artifacts": {
+        "folder": "D:\\Subuwu\\findings\\decompile\\lv9n001d",
+        "folder_exists": false,
+        "function_index_named": false,
+        "calibration_index": false,
+        "decomp_windows": 0
+      },
+      "files": [
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\decrypted_v2\\partial\\LV9N100_family\\LV9N001D.bin",
+          "size": 2097152
+        },
+        {
+          "path": "fixtures\\private\\plaintext_corpus\\keystream-recovered\\LV9N001D_2098176\\LV9N001D.bin",
+          "size": 2097152
+        }
+      ]
+    }
+  ],
+  "families": [
+    {
+      "family": "AZ1G",
+      "cid_count": 4,
+      "image_count": 10,
+      "cids": [
+        "AZ1G101M",
+        "AZ1G202G",
+        "AZ1G300F",
+        "AZ1G401V"
+      ],
+      "defined_cids": 4,
+      "named_cids": 0
+    },
+    {
+      "family": "A2ZJ",
+      "cid_count": 3,
+      "image_count": 3,
+      "cids": [
+        "A2ZJ201D",
+        "A2ZJ500I",
+        "A2ZJ500M"
+      ],
+      "defined_cids": 3,
+      "named_cids": 0
+    },
+    {
+      "family": "A8DH",
+      "cid_count": 3,
+      "image_count": 26,
+      "cids": [
+        "A8DH101I",
+        "A8DH201X",
+        "A8DH202X"
+      ],
+      "defined_cids": 3,
+      "named_cids": 3
+    },
+    {
+      "family": "A2TB",
+      "cid_count": 2,
+      "image_count": 6,
+      "cids": [
+        "A2TB001N",
+        "A2TB100K"
+      ],
+      "defined_cids": 2,
+      "named_cids": 0
+    },
+    {
+      "family": "A4TF",
+      "cid_count": 2,
+      "image_count": 6,
+      "cids": [
+        "A4TF800F",
+        "A4TF810F"
+      ],
+      "defined_cids": 2,
+      "named_cids": 0
+    },
+    {
+      "family": "EZ1G",
+      "cid_count": 2,
+      "image_count": 8,
+      "cids": [
+        "EZ1GB20I",
+        "EZ1GC00C"
+      ],
+      "defined_cids": 2,
+      "named_cids": 0
+    },
+    {
+      "family": "LF75",
+      "cid_count": 2,
+      "image_count": 22,
+      "cids": [
+        "LF75404H",
+        "LF75404S"
+      ],
+      "defined_cids": 2,
+      "named_cids": 2
+    },
+    {
+      "family": "LF79",
+      "cid_count": 2,
+      "image_count": 25,
+      "cids": [
+        "LF79100P",
+        "LF79101P"
+      ],
+      "defined_cids": 2,
+      "named_cids": 2
+    },
+    {
+      "family": "A2WC",
+      "cid_count": 1,
+      "image_count": 1,
+      "cids": [
+        "A2WC522S"
+      ],
+      "defined_cids": 1,
+      "named_cids": 0
+    },
+    {
+      "family": "A2WF",
+      "cid_count": 1,
+      "image_count": 1,
+      "cids": [
+        "A2WF101K"
+      ],
+      "defined_cids": 1,
+      "named_cids": 0
+    },
+    {
+      "family": "A4TH",
+      "cid_count": 1,
+      "image_count": 3,
+      "cids": [
+        "A4TH100H"
+      ],
+      "defined_cids": 1,
+      "named_cids": 0
+    },
+    {
+      "family": "EP5G",
+      "cid_count": 1,
+      "image_count": 1,
+      "cids": [
+        "EP5G600A"
+      ],
+      "defined_cids": 1,
+      "named_cids": 1
+    },
+    {
+      "family": "LF9D",
+      "cid_count": 1,
+      "image_count": 1,
+      "cids": [
+        "LF9D012H"
+      ],
+      "defined_cids": 1,
+      "named_cids": 1
+    },
+    {
+      "family": "LF9G",
+      "cid_count": 1,
+      "image_count": 6,
+      "cids": [
+        "LF9G003T"
+      ],
+      "defined_cids": 1,
+      "named_cids": 1
+    },
+    {
+      "family": "LF9L",
+      "cid_count": 1,
+      "image_count": 5,
+      "cids": [
+        "LF9L000E"
+      ],
+      "defined_cids": 1,
+      "named_cids": 1
+    },
+    {
+      "family": "LV9N",
+      "cid_count": 1,
+      "image_count": 2,
+      "cids": [
+        "LV9N001D"
+      ],
+      "defined_cids": 1,
+      "named_cids": 0
+    }
+  ]
+}

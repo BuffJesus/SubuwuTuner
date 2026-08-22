@@ -12,6 +12,14 @@ FetchContent_MakeAvailable(Catch2)
 list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
 include(Catch)
 
+if (TARGET subuwutuner-gui)
+    add_test(NAME gui_headless_startup_smoke
+             COMMAND subuwutuner-gui --smoke-test)
+    set_tests_properties(gui_headless_startup_smoke PROPERTIES
+        WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+        LABELS "ui;smoke;offline")
+endif()
+
 add_executable(st_unit_tests
     unit/core/test_result.cpp
     unit/core/test_error.cpp
@@ -69,6 +77,9 @@ add_executable(st_unit_tests
     unit/library/test_tune_index.cpp
     unit/library/test_filename_classifier.cpp
     unit/library/test_datalog_csv.cpp
+    unit/library/test_datalog_session.cpp
+    unit/library/test_guided_tasks.cpp
+    unit/ui/test_offline_workflow_smoke.cpp
     unit/devices/ets/test_ptm_variant_dispatcher.cpp
     unit/devices/ets/test_show_cur.cpp
     unit/ecu/test_extended_did_datalog.cpp

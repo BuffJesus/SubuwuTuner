@@ -21,7 +21,9 @@
 //   - theme.*         brand-purple palette + apply_theme + font load
 
 #include "st/autotune.hpp"
+#include "st/config.hpp"
 #include "st/core/version.hpp"
+#include "st/defs/pack_registry.hpp"
 #include "st/edit.hpp"
 #include "st/feature.hpp"
 #include "st/flash.hpp"
@@ -30,18 +32,15 @@
 #include "st/log/ebcs.hpp"
 #include "st/log/knock_dashboard.hpp"
 #include "st/policy.hpp"
-#include "st/config.hpp"
-#include "st/defs/pack_registry.hpp"
 #include "st/project.hpp"
 #include "st/transport/factory.hpp"
 #include "st/transport/mock.hpp"
 #include "st/transport/obdx_transport.hpp"
 #include "st/transport/uds_trace.hpp"
 
-#include "icon_data.hpp"
-
 #include "actions.hpp"
 #include "app_state.hpp"
+#include "icon_data.hpp"
 #include "modals/modals.hpp"
 #include "panels/panels.hpp"
 #include "persistence.hpp"
@@ -50,14 +49,15 @@
 #include "widgets/widgets.hpp"
 
 #include <GLFW/glfw3.h>
+
+#include <cstdio>
+#include <filesystem>
+#include <functional>
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
 #include <implot.h>
 #include <nfd.hpp>
-
-#include <cstdio>
-#include <functional>
 #include <string>
 #include <string_view>
 
@@ -77,10 +77,71 @@ void glfw_error_callback(int err, char const *desc) {
 // after the namespace closes.
 std::function<void()> g_render_frame;
 
+// Exercise the non-graphical half of application startup. This deliberately
+// runs before glfwInit(), making it suitable for CI agents and repair laptops
+// with no usable display/GPU. It validates the same persisted settings and
+// bundled resources a normal launch consumes, then opens either the supplied
+// project or the shipped demo through the real Project loader.
+int run_headless_startup_smoke(char const *argv0, char const *project_arg) {
+    (void)load_settings();
+    (void)load_recents();
+
+    auto const docs = resolve_docs_dir(argv0);
+    auto const changelog = resolve_changelog_path(argv0);
+    auto const demo = resolve_demo_project_path(argv0);
+    if (!docs.has_value() || !changelog.has_value() || !demo.has_value()) {
+        std::fprintf(stderr,
+                     "subuwutuner-gui: startup smoke failed: bundled docs, "
+                     "changelog, or demo project was not found\n");
+        return 2;
+    }
+
+    std::filesystem::path const project_path =
+        (project_arg != nullptr && project_arg[0] != '\0')
+            ? std::filesystem::path{project_arg}
+            : *demo;
+    auto project = st::Project::open(project_path);
+    if (!project.has_value()) {
+        auto const error = project.error().to_string();
+        std::fprintf(stderr, "subuwutuner-gui: startup smoke failed opening %s: %s\n",
+                     project_path.string().c_str(), error.c_str());
+        return 3;
+    }
+    if (project->definition().tables().empty()) {
+        std::fprintf(stderr,
+                     "subuwutuner-gui: startup smoke failed: project has no tables\n");
+        return 4;
+    }
+
+    std::printf("subuwutuner-gui: startup smoke passed (%s, %zu tables)\n",
+                project_path.string().c_str(), project->definition().tables().size());
+    return 0;
+}
+
 } // namespace st::ui
 
 int main(int argc, char *argv[]) {
     using namespace st::ui;
+
+    // Console-only commands must stay ahead of GLFW: --help should work on a
+    // headless machine, and --smoke-test exists specifically to validate an
+    // installation without creating a native window or contacting hardware.
+    std::string_view const first_arg = (argc >= 2) ? argv[1] : "";
+    if (first_arg == "-h" || first_arg == "--help" || first_arg == "/?") {
+        std::fputs("Usage: subuwutuner-gui [PROJECT.stune]\n"
+                   "       subuwutuner-gui --smoke-test [PROJECT.stune]\n"
+                   "  Open the optional .stune project on launch. Without an "
+                   "argument, the GUI starts on the welcome panel.\n"
+                   "  --smoke-test validates settings, bundled resources, and "
+                   "project loading without opening a window or hardware.\n",
+                   stdout);
+        return 0;
+    }
+    if (first_arg == "--smoke-test") {
+        return run_headless_startup_smoke(argc >= 1 ? argv[0] : nullptr,
+                                          argc >= 3 ? argv[2] : nullptr);
+    }
+
     glfwSetErrorCallback(glfw_error_callback);
     if (glfwInit() == 0) {
         std::fprintf(stderr, "subuwutuner-gui: glfwInit failed\n");
@@ -213,13 +274,6 @@ int main(int argc, char *argv[]) {
         state.first_run_step = 0;
     }
     std::string_view const arg1 = (argc >= 2) ? argv[1] : "";
-    if (arg1 == "-h" || arg1 == "--help" || arg1 == "/?") {
-        std::fputs("Usage: subuwutuner-gui [PROJECT.stune]\n"
-                   "  Open the optional .stune project on launch. Without an "
-                   "argument, the GUI starts on the welcome panel.\n",
-                   stderr);
-        return 0;
-    }
     // Skip arg1 if it's a flag we already handled (e.g. --reset-config)
     // so the project-path-from-argv path doesn't try to open a flag
     // string as a directory.
@@ -263,8 +317,7 @@ int main(int argc, char *argv[]) {
         // Skip when the help modal owns Ctrl+F (find-in-doc gesture
         // takes precedence over the sidebar-filter shortcut while the
         // modal is on screen).
-        if (!state.show_help_modal &&
-            ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_F)) {
+        if (!state.show_help_modal && ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_F)) {
             state.focus_table_filter = true;
         }
         if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Z)) {
@@ -391,6 +444,7 @@ int main(int argc, char *argv[]) {
         render_dockspace_host(state);
         render_sidebar(state);
         render_table_view(state, fonts);
+        render_readiness_panel(state);
         render_stats_panel(state);
         render_dtcs_panel(state);
         render_history_panel(state);
@@ -399,6 +453,7 @@ int main(int argc, char *argv[]) {
         render_coldstart_panel(state);
         render_ebcs_panel(state);
         render_gauge_cluster_panel(state);
+        render_log_explorer_panel(state);
         render_ap3_browser_panel(state);
         render_library_panel(state);
         render_compare_panel(state);
@@ -418,7 +473,6 @@ int main(int argc, char *argv[]) {
         render_ptm_save_and_push_modal(state);
         render_boot_screen_modal(state);
         render_datalog_channels_modal(state);
-        render_datalog_viewer_modal(state);
         render_pull_file_modal(state);
         render_ptm_diff_modal(state);
         render_new_project_modal(state);

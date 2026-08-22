@@ -15,12 +15,19 @@ using st::policy::default_pipeline;
 using st::policy::make_backup_present;
 using st::policy::make_battery_voltage_ok;
 using st::policy::make_checksum_known;
+using st::policy::make_ecu_communication_safe;
 using st::policy::make_ecu_id_match;
+using st::policy::make_ecu_identity_known;
+using st::policy::make_definition_match_verified;
 using st::policy::make_ignition_on;
 using st::policy::make_vin_match;
 using st::policy::make_write_extent_sane;
+using st::policy::make_journal_safe;
+using st::policy::make_recovery_image_present;
+using st::policy::make_source_image_verified;
 using st::policy::Pipeline;
 using st::policy::PreflightContext;
+using st::policy::EcuCommunicationState;
 
 namespace {
 
@@ -34,6 +41,12 @@ PreflightContext happy_path_ctx() {
     ctx.ignition_on = true;
     ctx.checksum_strategy_known = true;
     ctx.backup_present = true;
+    ctx.definition_match_verified = true;
+    ctx.source_image_verified = true;
+    ctx.recovery_image_present = true;
+    ctx.journal_safe = true;
+    ctx.approved_write_regions = {{0x1000, 0x1000}};
+    ctx.planned_write_ranges = {{0x1100, 0x100}};
     ctx.source_rom_size = std::uint64_t{2 * 1024 * 1024};
     ctx.bytes_to_write = std::uint64_t{64 * 1024};
     return ctx;
@@ -101,6 +114,109 @@ TEST_CASE("VinMatch blocks on mismatch", "[policy][preflight][vin]") {
     auto const r = Pipeline{}.add(make_vin_match()).run(ctx);
     REQUIRE_FALSE(r.ok());
     REQUIRE(has_blocker_in(r, "vin_match"));
+}
+
+TEST_CASE("EcuCommunicationSafe allows reachable and unknown states",
+          "[policy][preflight][ecu_communication]") {
+    auto ctx = happy_path_ctx();
+    ctx.ecu_communication_state = EcuCommunicationState::Reachable;
+    REQUIRE(Pipeline{}.add(make_ecu_communication_safe()).run(ctx).items().empty());
+
+    ctx.ecu_communication_state = EcuCommunicationState::Unknown;
+    REQUIRE(Pipeline{}.add(make_ecu_communication_safe()).run(ctx).items().empty());
+
+    ctx.ecu_communication_state = std::nullopt;
+    REQUIRE(Pipeline{}.add(make_ecu_communication_safe()).run(ctx).items().empty());
+}
+
+TEST_CASE("EcuCommunicationSafe blocks states that require external recovery",
+          "[policy][preflight][ecu_communication]") {
+    auto ctx = happy_path_ctx();
+    ctx.ecu_communication_state = EcuCommunicationState::IdentifiedButWriteRejected;
+    {
+        auto const r = Pipeline{}.add(make_ecu_communication_safe()).run(ctx);
+        REQUIRE_FALSE(r.ok());
+        REQUIRE(has_blocker_in(r, "ecu_communication"));
+    }
+
+    ctx.ecu_communication_state = EcuCommunicationState::SilentBootFailure;
+    {
+        auto const r = Pipeline{}.add(make_ecu_communication_safe()).run(ctx);
+        REQUIRE_FALSE(r.ok());
+        REQUIRE(has_blocker_in(r, "ecu_communication"));
+    }
+}
+
+TEST_CASE("EcuIdentityKnown blocks missing identity and allows a confirmed match",
+          "[policy][preflight][ecu_identity]") {
+    auto ctx = happy_path_ctx();
+    ctx.observed_ecu_id = std::nullopt;
+    {
+        auto const r = Pipeline{}.add(make_ecu_identity_known()).run(ctx);
+        REQUIRE_FALSE(r.ok());
+        REQUIRE(has_blocker_in(r, "ecu_identity_known"));
+    }
+
+    ctx = happy_path_ctx();
+    REQUIRE(Pipeline{}.add(make_ecu_identity_known()).run(ctx).items().empty());
+}
+
+TEST_CASE("Required write proofs block when absent and pass when verified",
+          "[policy][preflight][write_proofs]") {
+    auto ctx = happy_path_ctx();
+    ctx.definition_match_verified = false;
+    REQUIRE_FALSE(Pipeline{}.add(make_definition_match_verified()).run(ctx).ok());
+
+    ctx = happy_path_ctx();
+    ctx.source_image_verified = std::nullopt;
+    REQUIRE_FALSE(Pipeline{}.add(make_source_image_verified()).run(ctx).ok());
+
+    ctx = happy_path_ctx();
+    ctx.recovery_image_present = false;
+    REQUIRE_FALSE(Pipeline{}.add(make_recovery_image_present()).run(ctx).ok());
+
+    ctx = happy_path_ctx();
+    ctx.journal_safe = false;
+    REQUIRE_FALSE(Pipeline{}.add(make_journal_safe()).run(ctx).ok());
+
+    ctx = happy_path_ctx();
+    REQUIRE(Pipeline{}.add(make_definition_match_verified())
+                .add(make_source_image_verified())
+                .add(make_recovery_image_present())
+                .add(make_journal_safe())
+                .run(ctx)
+                .items()
+                .empty());
+}
+
+TEST_CASE("WriteRegionsSafe requires every planned range to fit one declared region",
+          "[policy][preflight][write_regions]") {
+    auto ctx = happy_path_ctx();
+    REQUIRE(Pipeline{}.add(st::policy::make_write_regions_safe()).run(ctx).items().empty());
+
+    ctx = happy_path_ctx();
+    ctx.approved_write_regions.clear();
+    {
+        auto const r = Pipeline{}.add(st::policy::make_write_regions_safe()).run(ctx);
+        REQUIRE_FALSE(r.ok());
+        REQUIRE(has_blocker_in(r, "write_regions"));
+    }
+
+    ctx = happy_path_ctx();
+    ctx.planned_write_ranges = {{0x1F00, 0x200}}; // crosses the region end
+    {
+        auto const r = Pipeline{}.add(st::policy::make_write_regions_safe()).run(ctx);
+        REQUIRE_FALSE(r.ok());
+        REQUIRE(has_blocker_in(r, "write_regions"));
+    }
+
+    ctx = happy_path_ctx();
+    ctx.planned_write_ranges = {{0x5000, 0x10}}; // outside the allow-list
+    {
+        auto const r = Pipeline{}.add(st::policy::make_write_regions_safe()).run(ctx);
+        REQUIRE_FALSE(r.ok());
+        REQUIRE(has_blocker_in(r, "write_regions"));
+    }
 }
 
 TEST_CASE("BatteryVoltageOk tiers warn/block correctly",

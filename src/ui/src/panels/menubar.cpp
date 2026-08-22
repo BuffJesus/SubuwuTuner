@@ -7,23 +7,21 @@
 // into request_layout_reset() (declared in panels.hpp, defined
 // alongside the dockspace).
 
-#include "panels/panels.hpp"
+#include "st/core/version.hpp"
+#include "st/policy.hpp"
 
 #include "actions.hpp"
 #include "app_state.hpp"
 #include "modals/modals.hpp" // pack_supports_fa24_swap
+#include "panels/panels.hpp"
 #include "persistence.hpp"
 #include "project_io.hpp"
 #include "theme.hpp"
 #include "widgets/widgets.hpp"
 
-#include "st/core/version.hpp"
-#include "st/policy.hpp"
-
-#include <imgui.h>
-
 #include <cstddef>
 #include <cstdio>
+#include <imgui.h>
 #include <string>
 
 namespace st::ui {
@@ -33,12 +31,11 @@ void render_menubar(AppState &state) {
     // Edits route through the active slot (Issue #10 phase 3). Each
     // ROM has its own per-ROM history; source is the only slot
     // where editing_allowed is false.
-    bool const editing_allowed =
-        has_project && state.project->active_rom_mut() != nullptr;
-    bool const can_undo = has_project && editing_allowed &&
-                          state.project->active_history().can_undo();
-    bool const can_redo = has_project && editing_allowed &&
-                          state.project->active_history().can_redo();
+    bool const editing_allowed = has_project && state.project->active_rom_mut() != nullptr;
+    bool const can_undo =
+        has_project && editing_allowed && state.project->active_history().can_undo();
+    bool const can_redo =
+        has_project && editing_allowed && state.project->active_history().can_redo();
 
     // Tooltip on a menu item even when it's disabled — so the user
     // understands WHY it's grayed out rather than just seeing the
@@ -85,8 +82,8 @@ void render_menubar(AppState &state) {
             if (ImGui::MenuItem("\xEE\xA0\x84  Inspect .ptm File\xE2\x80\xA6")) {
                 state.show_ptm_inspect_modal = true;
             }
-            if (ImGui::MenuItem("\xEE\x9D\x8E  Export as .ptm\xE2\x80\xA6", nullptr,
-                                false, has_project)) {
+            if (ImGui::MenuItem("\xEE\x9D\x8E  Export as .ptm\xE2\x80\xA6", nullptr, false,
+                                has_project)) {
                 state.show_ptm_export_modal = true;
             }
             if (!has_project) {
@@ -98,8 +95,8 @@ void render_menubar(AppState &state) {
             // streams it to the connected AP's /maps/ folder in one
             // shot. Gated on the workflow flag; the entry is omitted
             // entirely in the default-OFF distribution build.
-            if (ImGui::MenuItem("\xEE\xA2\x8C  Save & Push to AP\xE2\x80\xA6",
-                                nullptr, false, has_project)) {
+            if (ImGui::MenuItem("\xEE\xA2\x8C  Save & Push to AP\xE2\x80\xA6", nullptr, false,
+                                has_project)) {
                 state.show_ptm_save_and_push_modal = true;
             }
             if (!has_project) {
@@ -116,8 +113,8 @@ void render_menubar(AppState &state) {
             // and same parser, so the two surfaces round-trip with each
             // other.
             bool const can_csv = has_project && !state.selected_table_id.empty();
-            if (ImGui::MenuItem("\xEE\x84\x9B  Import CSV into Table\xE2\x80\xA6", nullptr,
-                                false, can_csv)) {
+            if (ImGui::MenuItem("\xEE\x84\x9B  Import CSV into Table\xE2\x80\xA6", nullptr, false,
+                                can_csv)) {
                 import_csv_into_current_table_dialog(state);
             }
             if (!can_csv) {
@@ -125,8 +122,8 @@ void render_menubar(AppState &state) {
                              "Imports a row,col,value CSV as a single bulk edit\n"
                              "(undoable via Ctrl+Z).");
             }
-            if (ImGui::MenuItem("\xEE\x9D\xA8  Export Table as CSV\xE2\x80\xA6", nullptr,
-                                false, can_csv)) {
+            if (ImGui::MenuItem("\xEE\x9D\xA8  Export Table as CSV\xE2\x80\xA6", nullptr, false,
+                                can_csv)) {
                 export_current_table_csv_dialog(state, /*diff_only=*/false);
             }
             if (!can_csv) {
@@ -153,21 +150,19 @@ void render_menubar(AppState &state) {
                 do_undo(state);
             }
             if (has_project && !can_undo) {
-                disabled_tip(editing_allowed
-                                 ? "Nothing to undo — no edits have been made\n"
-                                   "to the active ROM."
-                                 : "Source ROM is read-only. Switch View →\n"
-                                   "Active ROM to an editable slot first.");
+                disabled_tip(editing_allowed ? "Nothing to undo — no edits have been made\n"
+                                               "to the active ROM."
+                                             : "Source ROM is read-only. Switch View →\n"
+                                               "Active ROM to an editable slot first.");
             }
             if (ImGui::MenuItem("\xEE\x9E\xA6  Redo", "Ctrl+Shift+Z", false, can_redo)) {
                 do_redo(state);
             }
             if (has_project && !can_redo) {
-                disabled_tip(editing_allowed
-                                 ? "Nothing to redo.\n"
-                                   "Use Undo first, then Redo to step forward."
-                                 : "Source ROM is read-only. Switch View →\n"
-                                   "Active ROM to an editable slot first.");
+                disabled_tip(editing_allowed ? "Nothing to redo.\n"
+                                               "Use Undo first, then Redo to step forward."
+                                             : "Source ROM is read-only. Switch View →\n"
+                                               "Active ROM to an editable slot first.");
             }
             ImGui::Separator();
             bool const has_selection = state.selection.enabled;
@@ -184,11 +179,10 @@ void render_menubar(AppState &state) {
                 paste_clipboard_at_cursor(state);
             }
             if (has_project && !can_paste) {
-                disabled_tip(editing_allowed
-                                 ? "Select a target cell, then paste TSV from the\n"
-                                   "clipboard at the cursor."
-                                 : "Source ROM is read-only. Switch View →\n"
-                                   "Active ROM to an editable slot first.");
+                disabled_tip(editing_allowed ? "Select a target cell, then paste TSV from the\n"
+                                               "clipboard at the cursor."
+                                             : "Source ROM is read-only. Switch View →\n"
+                                               "Active ROM to an editable slot first.");
             }
             ImGui::Separator();
             bool const can_reset = has_selection && editing_allowed;
@@ -196,11 +190,10 @@ void render_menubar(AppState &state) {
                 reset_selection_to_source(state);
             }
             if (has_project && !can_reset) {
-                disabled_tip(editing_allowed
-                                 ? "Reverts the selected cells to their source-ROM\n"
-                                   "values (undoable)."
-                                 : "Source ROM is read-only. Switch View →\n"
-                                   "Active ROM to an editable slot first.");
+                disabled_tip(editing_allowed ? "Reverts the selected cells to their source-ROM\n"
+                                               "values (undoable)."
+                                             : "Source ROM is read-only. Switch View →\n"
+                                               "Active ROM to an editable slot first.");
             }
             ImGui::Separator();
             // Auto-Tune submenu. Groups the kernel-driven proposal flows so
@@ -287,70 +280,61 @@ void render_menubar(AppState &state) {
                 state.show_def_registry_modal = true;
             }
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip(
-                    "Walk a definitions directory via PackRegistry and\n"
-                    "list every pack found (loose + zipped). Useful\n"
-                    "for verifying a ship-time install layout where\n"
-                    "<platform>.zip archives replace loose .toml files.");
+                ImGui::SetTooltip("Walk a definitions directory via PackRegistry and\n"
+                                  "list every pack found (loose + zipped). Useful\n"
+                                  "for verifying a ship-time install layout where\n"
+                                  "<platform>.zip archives replace loose .toml files.");
             }
-            if (ImGui::MenuItem(
-                    "\xEE\xA0\x80  Datalog Channel Catalog\xE2\x80\xA6",
-                    nullptr, false, has_project)) {
+            if (ImGui::MenuItem("\xEE\xA0\x80  Datalog Channel Catalog\xE2\x80\xA6", nullptr, false,
+                                has_project)) {
                 state.show_datalog_channels_modal = true;
             }
             if (!has_project) {
-                disabled_tip(
-                    "Open a project first — the catalog lists every SSM\n"
-                    "PID + RAM switch from the project's definition pack.");
+                disabled_tip("Open a project first — the catalog lists every SSM\n"
+                             "PID + RAM switch from the project's definition pack.");
             } else if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip(
-                    "Every loggable SSM PID + RAM switch in the loaded\n"
-                    "definition pack. Filterable search; flags the\n"
-                    "default-log channels.");
+                ImGui::SetTooltip("Every loggable SSM PID + RAM switch in the loaded\n"
+                                  "definition pack. Filterable search; flags the\n"
+                                  "default-log channels.");
             }
-            if (ImGui::MenuItem(
-                    "\xEE\xA0\x84  Datalog Viewer\xE2\x80\xA6")) {
-                state.show_datalog_viewer_modal = true;
+            if (ImGui::MenuItem("\xEE\xA0\x84  Log Explorer")) {
+                apply_workspace_mode(state, WorkspaceMode::Datalog);
+                state.show_log_explorer_panel = true;
             }
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip(
-                    "Open a CSV datalog (decompress .csv.gz first) and\n"
-                    "inspect per-channel min / max / mean / count plus a\n"
-                    "line plot for any selected channel.");
+                ImGui::SetTooltip("Open the docked Log workspace, import a CSV datalog,\n"
+                                  "search signals, apply workflow profiles, and compare\n"
+                                  "selected channels against time.");
             }
 #ifdef ST_HAVE_AP_WORKFLOW
-            if (ImGui::MenuItem(
-                    "\xEE\xA0\x84  Pull File from AP\xE2\x80\xA6")) {
+            if (ImGui::MenuItem("\xEE\xA0\x84  Pull File from AP\xE2\x80\xA6")) {
                 state.show_pull_file_modal = true;
             }
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip(
-                    "One-off file pull from the connected AccessPort —\n"
-                    "for paths outside the canonical /maps + /datalog +\n"
-                    "/presets + /images surface.");
+                ImGui::SetTooltip("One-off file pull from the connected AccessPort —\n"
+                                  "for paths outside the canonical /maps + /datalog +\n"
+                                  "/presets + /images surface.");
             }
 #endif
             if (ImGui::MenuItem("\xEE\x9C\x93  Settings\xE2\x80\xA6")) {
                 state.show_settings_modal = true;
             }
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip(
-                    "Edit the runtime config that PackRegistry and\n"
-                    "rom-pull consult for default paths. Lives at\n"
-                    "%%APPDATA%%\\SubuwuTuner\\config.toml. Equivalent\n"
-                    "to running `subuwutuner-cli config set` from a\n"
-                    "shell. See docs/25 for precedence rules.");
+                ImGui::SetTooltip("Edit the runtime config that PackRegistry and\n"
+                                  "rom-pull consult for default paths. Lives at\n"
+                                  "%%APPDATA%%\\SubuwuTuner\\config.toml. Equivalent\n"
+                                  "to running `subuwutuner-cli config set` from a\n"
+                                  "shell. See docs/25 for precedence rules.");
             }
             if (ImGui::MenuItem("\xEE\xA2\xB0  Run Diagnostics\xE2\x80\xA6")) {
                 state.show_doctor_modal = true;
             }
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip(
-                    "Install-health triage: build identity, cipher state,\n"
-                    "config-file load, definitions root + pack count,\n"
-                    "AccessPort detection. Same checks as the CLI's\n"
-                    "`subuwutuner-cli doctor`, surfaced visually.\n"
-                    "The 'start here' modal when something isn't working.");
+                ImGui::SetTooltip("Install-health triage: build identity, cipher state,\n"
+                                  "config-file load, definitions root + pack count,\n"
+                                  "AccessPort detection. Same checks as the CLI's\n"
+                                  "`subuwutuner-cli doctor`, surfaced visually.\n"
+                                  "The 'start here' modal when something isn't working.");
             }
             // Common-workflows submenu — discovery-and-action surface
             // for opinionated multi-table recipes. Each entry routes to
@@ -361,54 +345,47 @@ void render_menubar(AppState &state) {
             ImGui::Separator();
             if (ImGui::BeginMenu("\xEE\xA2\xA8  Common Workflows")) {
                 bool const fa24_ok = pack_supports_fa24_swap(state);
-                if (ImGui::MenuItem("FA24 swap (VA WRX)\xE2\x80\xA6", nullptr, false,
-                                    fa24_ok)) {
+                if (ImGui::MenuItem("FA24 swap (VA WRX)\xE2\x80\xA6", nullptr, false, fa24_ok)) {
                     state.show_fa24_swap_modal = true;
                 }
                 if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
                     if (fa24_ok) {
-                        ImGui::SetTooltip(
-                            "Guided 3-step recipe for the FA20→FA24 engine swap.\n"
-                            "Applies Engine Displacement + HPFP-Timing + AVCS-\n"
-                            "Reference + Injector-Mult edits atomically. Reversible\n"
-                            "via the status-bar badge after Apply.");
+                        ImGui::SetTooltip("Guided 3-step recipe for the FA20→FA24 engine swap.\n"
+                                          "Applies Engine Displacement + HPFP-Timing + AVCS-\n"
+                                          "Reference + Injector-Mult edits atomically. Reversible\n"
+                                          "via the status-bar badge after Apply.");
                     } else if (!state.project.has_value()) {
-                        ImGui::SetTooltip(
-                            "Open a project first. The workflow needs a loaded\n"
-                            "calibration pack to know which tables to edit.");
+                        ImGui::SetTooltip("Open a project first. The workflow needs a loaded\n"
+                                          "calibration pack to know which tables to edit.");
                     } else {
-                        ImGui::SetTooltip(
-                            "This pack doesn't declare FA24-swap support — it's\n"
-                            "missing one or more of: HPFP Base Offset, AVCS\n"
-                            "Intake Cam Target (Closed, Baro Low/High), Injector\n"
-                            "Mult Table, Engine Displacement. Pick a project\n"
-                            "based on LF79101P / LF79103P / LF9L000E to enable.");
+                        ImGui::SetTooltip("This pack doesn't declare FA24-swap support — it's\n"
+                                          "missing one or more of: HPFP Base Offset, AVCS\n"
+                                          "Intake Cam Target (Closed, Baro Low/High), Injector\n"
+                                          "Mult Table, Engine Displacement. Pick a project\n"
+                                          "based on LF79101P / LF79103P / LF9L000E to enable.");
                     }
                 }
                 bool const tgv_egr_ok = pack_supports_tgv_egr_delete(state);
-                if (ImGui::MenuItem("TGV + EGR Delete (off-road only)\xE2\x80\xA6",
-                                    nullptr, false, tgv_egr_ok)) {
+                if (ImGui::MenuItem("TGV + EGR Delete (off-road only)\xE2\x80\xA6", nullptr, false,
+                                    tgv_egr_ok)) {
                     state.show_tgv_egr_delete_modal = true;
                 }
                 if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
                     if (tgv_egr_ok) {
-                        ImGui::SetTooltip(
-                            "Guided 3-step delete: zeros 5 EGR + TGV cal tables\n"
-                            "and disables the P0400 DTC. Per analyst Tasks A-F\n"
-                            "(2026-06-09). Jurisdiction-gated; not for daily-\n"
-                            "drivers on public roads. Reversible via the\n"
-                            "status-bar badge after Apply.");
+                        ImGui::SetTooltip("Guided 3-step delete: zeros 5 EGR + TGV cal tables\n"
+                                          "and disables the P0400 DTC. Per analyst Tasks A-F\n"
+                                          "(2026-06-09). Jurisdiction-gated; not for daily-\n"
+                                          "drivers on public roads. Reversible via the\n"
+                                          "status-bar badge after Apply.");
                     } else if (!state.project.has_value()) {
-                        ImGui::SetTooltip(
-                            "Open a project first. The workflow needs a loaded\n"
-                            "calibration pack to know which tables to edit.");
+                        ImGui::SetTooltip("Open a project first. The workflow needs a loaded\n"
+                                          "calibration pack to know which tables to edit.");
                     } else {
-                        ImGui::SetTooltip(
-                            "This pack doesn't declare TGV+EGR-delete support —\n"
-                            "missing one or more of: EGR Airflow, EGR Absolute\n"
-                            "Pressure Main, TGV Closed Activation, Ignition\n"
-                            "Timing EGR Adders A/C. Currently supported on\n"
-                            "LF79103P (+ inherited via LF79101P).");
+                        ImGui::SetTooltip("This pack doesn't declare TGV+EGR-delete support —\n"
+                                          "missing one or more of: EGR Airflow, EGR Absolute\n"
+                                          "Pressure Main, TGV Closed Activation, Ignition\n"
+                                          "Timing EGR Adders A/C. Currently supported on\n"
+                                          "LF79103P (+ inherited via LF79101P).");
                     }
                 }
                 ImGui::EndMenu();
@@ -435,15 +412,13 @@ void render_menubar(AppState &state) {
             if (ImGui::BeginMenu("Active ROM", has_project)) {
                 bool const is_working = state.viewing_working_rom();
                 bool const is_source = state.active_rom_id == "source";
-                if (ImGui::MenuItem("Working", nullptr, is_working) &&
-                    !is_working) {
+                if (ImGui::MenuItem("Working", nullptr, is_working) && !is_working) {
                     set_active_view_rom(state, "working");
                 }
                 if (ImGui::IsItemHovered()) {
                     ImGui::SetTooltip("The project's primary editable slot.");
                 }
-                if (ImGui::MenuItem("Source (read-only)", nullptr, is_source) &&
-                    !is_source) {
+                if (ImGui::MenuItem("Source (read-only)", nullptr, is_source) && !is_source) {
                     set_active_view_rom(state, "source");
                 }
                 if (ImGui::IsItemHovered()) {
@@ -452,14 +427,11 @@ void render_menubar(AppState &state) {
                                       "disable while this slot is active.");
                 }
                 ImGui::Separator();
-                if (state.project.has_value() &&
-                    !state.project->additional_roms().empty()) {
+                if (state.project.has_value() && !state.project->additional_roms().empty()) {
                     for (auto const &r : state.project->additional_roms()) {
                         bool const is_active = state.active_rom_id == r.id;
-                        std::string const label =
-                            r.display_name.empty() ? r.id : r.display_name;
-                        if (ImGui::MenuItem(label.c_str(), nullptr, is_active) &&
-                            !is_active) {
+                        std::string const label = r.display_name.empty() ? r.id : r.display_name;
+                        if (ImGui::MenuItem(label.c_str(), nullptr, is_active) && !is_active) {
                             set_active_view_rom(state, r.id);
                         }
                     }
@@ -469,8 +441,7 @@ void render_menubar(AppState &state) {
                     // when no extra ROMs have been imported yet.
                     // Without this the separator above looks like the
                     // menu got cut off mid-list.
-                    ImGui::MenuItem("(no additional ROMs imported)", nullptr,
-                                    false, false);
+                    ImGui::MenuItem("(no additional ROMs imported)", nullptr, false, false);
                     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
                         ImGui::SetTooltip(
                             "Add ROMs via Tools \xE2\x86\x92 Read ROM from Car\xE2\x80\xA6\n"
@@ -486,37 +457,39 @@ void render_menubar(AppState &state) {
             // Panel visibility. Sidebar + Table are always-on (primary
             // navigation); Stats and DTCs are secondary panels the user
             // may want hidden when working in the table grid full-screen.
+            ImGui::MenuItem("Project Readiness", nullptr, &state.show_readiness_panel);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Offline-first project cockpit: identity, definition, changes, "
+                                  "recovery evidence, and the next useful action.");
+            }
             ImGui::MenuItem("Stats Panel", nullptr, &state.show_stats_panel);
+            ImGui::MenuItem("Log Explorer", nullptr, &state.show_log_explorer_panel);
             ImGui::MenuItem("DTCs Panel", nullptr, &state.show_dtcs_panel);
             ImGui::MenuItem("Tune Library", nullptr, &state.show_library_panel);
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip(
-                    "Browse the user's local .ptm tune library. Reads\n"
-                    "library_index.toml — produced by\n"
-                    "tools/library_inventory/inventory.py. Vendor / stage /\n"
-                    "variant facets; future cross-references against the\n"
-                    "AccessPort's /backupcksum.");
+                ImGui::SetTooltip("Browse the user's local .ptm tune library. Reads\n"
+                                  "library_index.toml — produced by\n"
+                                  "tools/library_inventory/inventory.py. Vendor / stage /\n"
+                                  "variant facets; future cross-references against the\n"
+                                  "AccessPort's /backupcksum.");
             }
 #ifdef ST_HAVE_AP_WORKFLOW
             ImGui::MenuItem("AccessPort Browser", nullptr, &state.show_ap3_browser_panel);
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip(
-                    "Manage tunes / datalogs / presets on a COBB AccessPort V3\n"
-                    "over USB. Capability A (file vault) only — the .ptm patch\n"
-                    "introspection tier ships off by default. See docs/34.");
+                ImGui::SetTooltip("Manage tunes / datalogs / presets on a COBB AccessPort V3\n"
+                                  "over USB. Capability A (file vault) only — the .ptm patch\n"
+                                  "introspection tier ships off by default. See docs/34.");
             }
 #endif
             ImGui::MenuItem("History Panel", nullptr, &state.show_history_panel);
-            ImGui::MenuItem("Knock Dashboard", nullptr,
-                            &state.show_knock_dashboard_panel);
+            ImGui::MenuItem("Knock Dashboard", nullptr, &state.show_knock_dashboard_panel);
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("Per-cylinder knock dashboard. Load a CSV datalog,\n"
                                   "map RPM / load / per-cyl FLKC + FBKC columns,\n"
                                   "compute a windowed snapshot, view strip charts.\n"
                                   "See docs/05-improvements.md §11.");
             }
-            ImGui::MenuItem("Adaptive History", nullptr,
-                            &state.show_adaptive_history_panel);
+            ImGui::MenuItem("Adaptive History", nullptr, &state.show_adaptive_history_panel);
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("Long-cycle LTFT / DAM / idle-adapt drift charts.\n"
                                   "Load a CSV with timestamps + per-signal columns,\n"
@@ -536,8 +509,7 @@ void render_menubar(AppState &state) {
                                   "heuristic Kp/Ki/Kd gain-adjustment suggestions.\n"
                                   "Advisory only — verify on a dyno. See docs/05 §11.");
             }
-            ImGui::MenuItem("Gauge Cluster (live)", nullptr,
-                            &state.show_gauge_cluster_panel);
+            ImGui::MenuItem("Gauge Cluster (live)", nullptr, &state.show_gauge_cluster_panel);
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("Live gauge cluster with headline values + ImPlot\n"
                                   "mini-line history per channel. v1 ships with a\n"
@@ -572,8 +544,7 @@ void render_menubar(AppState &state) {
             // entry surfaces the new scope without forcing the user to
             // open the panel and discover the dropdown.
             if (ImGui::MenuItem("Audit (per-vehicle history)", nullptr, nullptr,
-                                state.settings.active_vehicle_profile_id.empty()
-                                    ? false : true)) {
+                                state.settings.active_vehicle_profile_id.empty() ? false : true)) {
                 state.audit_scope = AppState::AuditScope::Vehicle;
                 state.audit_pinned_keys.clear();
                 state.audit_show_pinned_only = false;
@@ -582,10 +553,9 @@ void render_menubar(AppState &state) {
                 state.show_audit_panel = true;
             }
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-                ImGui::SetTooltip(
-                    "Open the Audit panel pre-scoped to per-vehicle\n"
-                    "history — aggregates every project's appends for\n"
-                    "this car's CID. Needs an active VehicleProfile.");
+                ImGui::SetTooltip("Open the Audit panel pre-scoped to per-vehicle\n"
+                                  "history — aggregates every project's appends for\n"
+                                  "this car's CID. Needs an active VehicleProfile.");
             }
             ImGui::Separator();
             if (ImGui::BeginMenu("Theme")) {
@@ -618,8 +588,7 @@ void render_menubar(AppState &state) {
             // Promoted out of Debug to top-level so users actually
             // discover it; the audit flagged that hiding it next to
             // the ImGui demo made it read as a developer escape hatch.
-            ImGui::MenuItem("Custom Features Designer", nullptr,
-                            &state.show_features_designer);
+            ImGui::MenuItem("Custom Features Designer", nullptr, &state.show_features_designer);
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("Phase 5 node-graph editor for authoring custom\n"
                                   "features (rev limiters, flat-foot shift, etc.).\n"
@@ -682,9 +651,8 @@ void render_menubar(AppState &state) {
             ImGui::BulletText(
                 "File \xE2\x86\x92 Open Project\xE2\x80\xA6 (Ctrl+O) to pick a .stune directory.");
             ImGui::BulletText("Or pass one on the command line: subuwutuner-gui my.stune");
-            ImGui::BulletText(
-                "No project of your own? Open the bundled fixtures/demo.stune/ to "
-                "explore the UI.");
+            ImGui::BulletText("No project of your own? Open the bundled fixtures/demo.stune/ to "
+                              "explore the UI.");
             ImGui::Separator();
             text_subtle("Editing");
             ImGui::BulletText("Click cells to select; Shift-click to extend.");
@@ -701,8 +669,7 @@ void render_menubar(AppState &state) {
             ImGui::BulletText("Ctrl+Z / Ctrl+Shift+Z to undo / redo.  Ctrl+S to save.");
             ImGui::Separator();
             text_subtle("Navigation");
-            ImGui::BulletText(
-                "Ctrl+K opens the command palette — search every action + table.");
+            ImGui::BulletText("Ctrl+K opens the command palette — search every action + table.");
             ImGui::BulletText("Ctrl+F focuses the table-filter box.  Esc clears it.");
             ImGui::BulletText("Filter matches both the table's name and its snake_case id.");
             ImGui::BulletText(
