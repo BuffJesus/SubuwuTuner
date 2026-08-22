@@ -758,6 +758,29 @@ void render_log_explorer_panel(AppState &app_state) {
                     }
                     text_subtle("%s", ctx);
                 }
+                // Make the finding actionable: jump the trace cursor to the
+                // worst sample and drop a marker there so it's visible on the
+                // plot / map-cell trace.
+                if (f.worst_row.has_value()) {
+                    char btn[64];
+                    std::snprintf(btn, sizeof(btn), "Go to sample %zu##la_go_%s", *f.worst_row,
+                                  f.id.c_str());
+                    if (ImGui::SmallButton(btn)) {
+                        s.trace_row = static_cast<int>(*f.worst_row);
+                        bool marked = false;
+                        for (auto const &m : s.markers) {
+                            if (m.row == *f.worst_row) {
+                                marked = true;
+                                break;
+                            }
+                        }
+                        if (!marked) {
+                            s.markers.push_back({*f.worst_row, f.title});
+                        }
+                        s.session_message =
+                            "Jumped to sample " + std::to_string(*f.worst_row) + ".";
+                    }
+                }
                 ImGui::Unindent();
                 ImGui::Spacing();
             }
