@@ -57,6 +57,12 @@ struct AtlasTable {
     bool needs_def_promotion{false};
     bool common_core{false};
     bool high_variance{false};
+    // Corpus finding (tuning-knowledge-2026-06-13): tables no tuner cluster
+    // ever edits across the sampled corpus — the "118-table factory-immutable
+    // collapse list" plus the 12 AVCS baro-comp dead-weight tables. The Tables
+    // sidebar hides these by default to cut the surface from hundreds of rows
+    // to the tuning-relevant core, with a toggle to bring them back.
+    bool factory_immutable{false};
     std::vector<std::string> clusters;
     std::vector<std::string> co_edits;
     // v2+: the CID this record's `address` / `size_bytes` apply to. Empty

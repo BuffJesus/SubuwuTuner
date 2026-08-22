@@ -656,6 +656,12 @@ struct AppState {
     // Order doesn't matter (treated as a set) but the underlying
     // type is vector for cheap cross-frame iteration.
     std::vector<std::string> sidebar_hidden_categories;
+    // When true (the default), the Tables sidebar hides tables the Atlas
+    // marks `factory_immutable` — the corpus-derived "never tuned" set (the
+    // 118-table collapse list + 12 AVCS baro-comp dead-weight tables). Cuts
+    // the visible surface to the tuning-relevant core; toggled from the
+    // sidebar panel menu. Session-only (no atlas → no effect anyway).
+    bool sidebar_hide_factory_immutable{true};
     // One-shot request to force-close every TreeNode in the sidebar
     // for one frame. Set by the "Collapse all" affordance under the
     // filter input; sidebar.cpp consumes it (SetNextItemOpen(false,

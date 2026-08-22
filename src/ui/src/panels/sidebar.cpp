@@ -197,6 +197,16 @@ void render_sidebar(AppState &state) {
         if (!has_hidden) {
             text_subtle("(no hidden categories)");
         }
+        ImGui::Separator();
+        ImGui::Checkbox("Hide factory-immutable tables",
+                        &state.sidebar_hide_factory_immutable);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "Corpus finding: hide tables no tuner cluster ever edits\n"
+                "(the factory-immutable set + AVCS baro-comp dead weight),\n"
+                "cutting the list to the tuning-relevant core. Needs an atlas\n"
+                "file; packs without one are unaffected.");
+        }
         ImGui::EndPopup();
     }
     // Apply hidden-set mutations from the panel menu before the
@@ -522,7 +532,27 @@ void render_sidebar(AppState &state) {
 
     auto const table_matches = explorer_matches;
 
+    // Count of tables suppressed by the factory-immutable filter this frame,
+    // surfaced at the bottom of the panel so the hidden set is discoverable.
+    int hidden_immutable_count = 0;
+
     auto const render_table_row = [&](st::Table const &t) {
+        // Atlas lookup up-front — drives BOTH the factory-immutable filter
+        // and the common-core ★ mark below. Lazy-loaded shared singleton;
+        // nullptr-degrade when no atlas file is on disk (so the demo pack,
+        // which has no atlas, is unaffected). Lookup is by def-pack table id.
+        st::library::AtlasTable const *atlas_entry = nullptr;
+        if (auto const *atlas = shared_atlas(); atlas != nullptr) {
+            atlas_entry = atlas->find_table(t.id);
+        }
+        // Corpus finding: tables no tuner cluster ever edits are hidden by
+        // default to cut the surface to the tuning-relevant core. Never hides
+        // the currently-selected table (so a jump-to never lands on a blank).
+        if (state.sidebar_hide_factory_immutable && atlas_entry != nullptr &&
+            atlas_entry->factory_immutable && state.selected_table_id != t.id) {
+            ++hidden_immutable_count;
+            return;
+        }
         bool const selected = state.selected_table_id == t.id;
         // Prefer the human-readable name as the primary label.
         // Snake-case IDs are developer-facing — surface them in the
@@ -547,15 +577,9 @@ void render_sidebar(AppState &state) {
         // otherwise scope the tooltip to just the tiny S/E letters
         // instead of the whole row.
         bool const row_hovered = ImGui::IsItemHovered();
-        // Atlas lookup — surfaces purple ★ next to common-core tables
-        // and feeds the hover tooltip. Lazy-loaded shared singleton;
-        // nullptr-degrade when no atlas file is on disk. Lookup is by
-        // def-pack table id; mismatch with the atlas's id namespace is
-        // a graceful nullptr (no spurious badges).
-        st::library::AtlasTable const *atlas_entry = nullptr;
-        if (auto const *atlas = shared_atlas(); atlas != nullptr) {
-            atlas_entry = atlas->find_table(t.id);
-        }
+        // `atlas_entry` was resolved at the top of this lambda (it also gates
+        // the factory-immutable filter). It surfaces the purple ★ for
+        // common-core tables and feeds the hover tooltip.
         // Right-aligned policy badges: S (engine-safety-critical, warm
         // amber) and E (emissions-relevant, muted yellow). Drawn AFTER
         // the Selectable so AllowOverlap is needed; reads "tagged" at a
@@ -1067,6 +1091,11 @@ void render_sidebar(AppState &state) {
             h.erase(std::remove(h.begin(), h.end(), *footer_unhide), h.end());
             save_sidebar_hidden_categories(state.project->dir(), h);
         }
+    }
+    if (hidden_immutable_count > 0) {
+        text_subtle("%d factory-immutable table%s hidden \xE2\x80\x94 toggle in the "
+                    "panel menu.",
+                    hidden_immutable_count, hidden_immutable_count == 1 ? "" : "s");
     }
     ImGui::End();
 }

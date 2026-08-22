@@ -118,6 +118,7 @@ Result<Atlas> Atlas::load_from_string(std::string_view toml_text) {
                 (*t)["needs_def_promotion"].value_or<bool>(false);
             e.common_core = (*t)["common_core"].value_or<bool>(false);
             e.high_variance = (*t)["high_variance"].value_or<bool>(false);
+            e.factory_immutable = (*t)["factory_immutable"].value_or<bool>(false);
             e.clusters = read_string_array(*t, "clusters");
             e.co_edits = read_string_array(*t, "co_edits");
             // v2: optional per-table primary_cid override. v1 atlases omit

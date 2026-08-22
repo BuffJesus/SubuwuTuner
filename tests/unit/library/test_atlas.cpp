@@ -30,6 +30,7 @@ fa24_portability = "unclear"
 needs_def_promotion = true
 common_core = true
 high_variance = true
+factory_immutable = true
 clusters = ["cobb_stage1", "fehr_wrk"]
 co_edits = ["wastegate_duty_max"]
 
@@ -90,6 +91,7 @@ TEST_CASE("Atlas table fields parse round-trip", "[library][atlas]") {
     CHECK(t->fa24_portability == "unclear");
     CHECK(t->needs_def_promotion);
     CHECK(t->common_core);
+    CHECK(t->factory_immutable);
     CHECK(t->clusters.size() == 2);
     CHECK(t->co_edits.size() == 1);
 }

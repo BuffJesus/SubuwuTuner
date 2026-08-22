@@ -32,6 +32,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+import axis_corrections
+
 
 # ---------------------------------------------------------------------------
 # Type mapping
@@ -1506,6 +1508,13 @@ def main(argv: list[str] | None = None) -> int:
                         help="Additive merge: append only records whose id is "
                              "not already present in EXISTING.TOML. Requires "
                              "--rom-id when the XML has multiple roms.")
+    parser.add_argument("--axis-corrections", type=Path, nargs="?",
+                        const=axis_corrections.DEFAULT_CORRECTIONS,
+                        metavar="TSV",
+                        help="Override axis lengths from a firmware-derived "
+                             "corrections TSV (fixes the halved-dimension XML "
+                             "bug). With no path, uses the bundled "
+                             "corrections/axis_length_corrections.tsv.")
     args = parser.parse_args(argv)
 
     try:
@@ -1523,6 +1532,18 @@ def main(argv: list[str] | None = None) -> int:
     if not packs:
         print("defgen: no matching <rom> entries", file=sys.stderr)
         return 1
+
+    if args.axis_corrections is not None:
+        try:
+            corrections = axis_corrections.load_axis_corrections(args.axis_corrections)
+        except (OSError, ValueError) as e:
+            print(f"defgen: axis corrections: {e}", file=sys.stderr)
+            return 1
+        for pack in packs:
+            changed = axis_corrections.apply_axis_corrections(pack.axes, corrections)
+            for addr, old_len, new_len in changed:
+                print(f"defgen: axis 0x{addr:X} length {old_len} -> {new_len} "
+                      f"(firmware) in {pack.rom_id}", file=sys.stderr)
 
     if args.apply_to_pack is not None:
         if len(packs) > 1:
