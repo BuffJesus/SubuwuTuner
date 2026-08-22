@@ -291,6 +291,9 @@ struct AppState {
     // multiplies them.
     ImVec2 features_view_offset{0.0f, 0.0f};
     float features_view_scale{1.0f};
+    // One-shot request to recenter the canvas on a node (set when a
+    // validation finding is clicked; consumed + cleared by the canvas).
+    std::optional<st::feature::NodeId> features_focus_node;
     // Loaded once at startup, persisted on every successful open. See
     // recents_config_path() for the on-disk location.
     std::vector<RecentEntry> recents;

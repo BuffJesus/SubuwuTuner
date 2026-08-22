@@ -352,8 +352,13 @@ try {
         # Graph undo/redo: undo reverts the last edit, redo re-applies it.
         Invoke-RelativeClick $process 190 200 # Undo
         $captures += Save-WindowScreenshot $process "14-after-undo"
+        # Undo dropped the pin default, so lint now shows a warning. Open the
+        # status popup to capture the clickable "jump to node" findings.
+        Invoke-RelativeClick $process 115 227 # "1 warning" status pill
+        $captures += Save-WindowScreenshot $process "15-lint-findings"
+        Invoke-KeyChord $process ([byte[]](0x1B)) # dismiss popup
         Invoke-RelativeClick $process 241 200 # Redo
-        $captures += Save-WindowScreenshot $process "15-after-redo"
+        $captures += Save-WindowScreenshot $process "16-after-redo"
     } elseif ($Scenario -eq "Readiness") {
         # Dirty the project with one cell edit so the readiness verification
         # summary shows an actionable item and the Save-project remediation

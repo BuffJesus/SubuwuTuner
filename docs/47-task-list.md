@@ -241,9 +241,14 @@ Work this queue top-to-bottom while the bench rig is unavailable:
    behind visually exercised unsaved-work confirmation. Load has the equivalent
    gate and Save repeats directly once a document path exists. Recent-file
    context and automated native-dialog round trips remain.
-4. `[ ]` Turn validation and lint output into an actionable findings view with
+4. `[~]` Turn validation and lint output into an actionable findings view with
    node/pin navigation, and distinguish structural errors, incomplete inputs,
-   unsupported backend operations, and pack incompatibility.
+   unsupported backend operations, and pack incompatibility. The designer
+   status popup now separates structural errors (validate failures) from
+   completeness warnings (lint), and each lint finding that carries a node id
+   is a clickable row ("→ node 'Add' has no connections") that selects the
+   node and recenters the canvas on it. Verified live. Distinguishing
+   unsupported-backend vs pack-incompatibility categories remains.
 5. `[~]` Expose the existing feature-codegen library as an actual in-canvas
    SH-2A/RH850 compile preview, then verify it against safe synthetic fixtures,
    malformed graphs, and code-generation failures. The 2026-08-21 autonomous

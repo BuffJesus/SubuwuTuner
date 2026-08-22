@@ -558,10 +558,26 @@ void render_features_designer(AppState &state) {
             ImGui::Separator();
             ImGui::TextWrapped("%s", validate_result.error().to_string().c_str());
         } else if (!lint_findings.empty()) {
-            text_subtle("Completeness warnings");
+            text_subtle("Completeness warnings \xE2\x80\x94 click one to jump to its node");
             ImGui::Separator();
-            for (auto const &f : lint_findings) {
-                ImGui::BulletText("%s", f.message.c_str());
+            for (std::size_t i = 0; i < lint_findings.size(); ++i) {
+                auto const &f = lint_findings[i];
+                char row[192];
+                std::snprintf(row, sizeof(row), "%s%s##lintfind_%zu",
+                              f.node.has_value() ? "\xE2\x86\x92 " : "\xE2\x80\xA2 ",
+                              f.message.c_str(), i);
+                bool const clickable = f.node.has_value();
+                if (clickable) {
+                    if (ImGui::Selectable(row)) {
+                        state.features_selected_nodes.clear();
+                        state.features_selected_nodes.push_back(*f.node);
+                        state.features_selected_edge.reset();
+                        state.features_focus_node = *f.node;
+                        ImGui::CloseCurrentPopup();
+                    }
+                } else {
+                    ImGui::TextWrapped("\xE2\x80\xA2 %s", f.message.c_str());
+                }
             }
         } else {
             text_subtle("Graph passes structural validation "
@@ -629,6 +645,24 @@ void render_features_designer(AppState &state) {
     // View transform. Lambdas take graph-space, return screen-space
     // (and back). Kept as locals so the rest of the function can
     // read `scale` directly when it's the cleaner expression.
+    // Consume a pending "focus on node" request (from a clicked validation
+    // finding): recenter the view so that node sits mid-canvas. Applied to
+    // state.features_view_offset; the const `offset` below still holds this
+    // frame's value, so the recenter lands next frame (imperceptible).
+    if (state.features_focus_node.has_value()) {
+        for (auto const &n : state.features_graph.nodes()) {
+            if (n.id == *state.features_focus_node) {
+                constexpr float kApproxNodeHeight = 70.0f;
+                state.features_view_offset.x =
+                    canvas_sz.x * 0.5f - (n.x + kNodeWidth * 0.5f) * state.features_view_scale;
+                state.features_view_offset.y =
+                    canvas_sz.y * 0.5f - (n.y + kApproxNodeHeight * 0.5f) * state.features_view_scale;
+                break;
+            }
+        }
+        state.features_focus_node.reset();
+    }
+
     float const scale = state.features_view_scale;
     ImVec2 const offset = state.features_view_offset;
     auto const to_screen = [&](float gx, float gy) {
