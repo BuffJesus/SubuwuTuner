@@ -31,7 +31,12 @@ void text_centered(char const *text, float scale = 1.0f);
 void text_centered_disabled(char const *text);
 void text_centered_subtle(char const *text);
 
-#if defined(__GNUC__)
+// Clang defines __GNUC__ but rejects the gnu_printf archetype, so Clang uses
+// the printf archetype. MinGW GCC needs gnu_printf to check against
+// glibc-style conversions rather than the MSVC runtime's.
+#if defined(__clang__)
+[[gnu::format(printf, 1, 2)]]
+#elif defined(__GNUC__)
 [[gnu::format(gnu_printf, 1, 2)]]
 #endif
 void text_subtle(char const *fmt, ...);

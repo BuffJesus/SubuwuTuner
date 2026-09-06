@@ -164,12 +164,17 @@ GLuint upload_pixels_as_texture(
                   0, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    // GL_CLAMP is GL 1.1 core; GL_CLAMP_TO_EDGE arrived in 1.2 and
-    // isn't always declared by the system's `<GL/gl.h>` on Windows.
-    // For a static image sampled at native resolution the difference
-    // is invisible — both behave the same at the edge texels.
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
+    // The macOS core profile removed GL_CLAMP and rejects it with
+    // GL_INVALID_ENUM. Windows' <GL/gl.h> stops at GL 1.1 and does not
+    // declare GL_CLAMP_TO_EDGE. For a static image sampled at native
+    // resolution the two modes give the same edge texels.
+#if defined(__APPLE__)
+    constexpr GLint kWrapMode = GL_CLAMP_TO_EDGE;
+#else
+    constexpr GLint kWrapMode = GL_CLAMP;
+#endif
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, kWrapMode);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, kWrapMode);
     return tex;
 }
 #endif // ST_HAVE_AP_WORKFLOW
