@@ -92,7 +92,7 @@ constexpr std::array<nat::Opcode, 10> kRequestOpcodes = {
         crc ^= static_cast<std::uint16_t>(static_cast<std::uint16_t>(b) << 8U);
         for (int i = 0; i < 8; ++i) {
             if ((crc & 0x8000U) != 0U) {
-                crc = static_cast<std::uint16_t>((crc << 1U) ^ 0x1021U);
+                crc = static_cast<std::uint16_t>((static_cast<std::uint32_t>(crc) << 1U) ^ 0x1021U);
             } else {
                 crc = static_cast<std::uint16_t>(crc << 1U);
             }

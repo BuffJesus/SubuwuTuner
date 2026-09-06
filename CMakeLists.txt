@@ -91,6 +91,43 @@ set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 # Position independent code so we can mix static libs into shared later.
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# ---------------------------------------------------------------------------
+# std::stop_token availability
+# ---------------------------------------------------------------------------
+# libc++ 19.1 (Apple Clang 17 / Xcode 16) keeps <stop_token> behind
+# _LIBCPP_ENABLE_EXPERIMENTAL. The header exists and includes without error but
+# declares nothing, so std::stop_token fails at every use site instead of at the
+# #include. Probing the type rather than the compiler id keeps the define off a
+# libc++ that ships the header ungated, and off libstdc++ and the MSVC STL.
+include(CheckCXXSourceCompiles)
+
+set(kStopTokenProbe [[
+#include <stop_token>
+int main() {
+    std::stop_source src;
+    return src.get_token().stop_requested() ? 1 : 0;
+}
+]])
+
+check_cxx_source_compiles("${kStopTokenProbe}" ST_HAVE_STD_STOP_TOKEN)
+
+if(NOT ST_HAVE_STD_STOP_TOKEN)
+    set(CMAKE_REQUIRED_DEFINITIONS -D_LIBCPP_ENABLE_EXPERIMENTAL)
+    check_cxx_source_compiles("${kStopTokenProbe}"
+        ST_STOP_TOKEN_NEEDS_LIBCPP_EXPERIMENTAL)
+    unset(CMAKE_REQUIRED_DEFINITIONS)
+
+    if(ST_STOP_TOKEN_NEEDS_LIBCPP_EXPERIMENTAL)
+        add_compile_definitions(_LIBCPP_ENABLE_EXPERIMENTAL)
+    else()
+        message(FATAL_ERROR
+            "std::stop_token is not available from this standard library, and "
+            "_LIBCPP_ENABLE_EXPERIMENTAL does not unlock it. st::devices::ets "
+            "uses it for async cancellation. Build against libstdc++ 10+, the "
+            "MSVC STL, or a libc++ that provides <stop_token>.")
+    endif()
+endif()
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(CompilerWarnings)
 include(Sanitizers)

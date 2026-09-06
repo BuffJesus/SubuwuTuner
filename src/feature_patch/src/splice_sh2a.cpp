@@ -36,7 +36,7 @@ namespace {
 
 // JMP @Rn — 0100 nnnn 0010 1011 = 0x402B | (n << 8). For R0: 0x402B.
 [[nodiscard]] constexpr std::uint16_t enc_jmp_at_reg(std::uint8_t reg) noexcept {
-    return static_cast<std::uint16_t>(0x402BU | (static_cast<std::uint16_t>(reg) << 8U));
+    return static_cast<std::uint16_t>(0x402BU | (static_cast<std::uint32_t>(reg) << 8U));
 }
 
 // SH-2A is big-endian on the wire. Write a u16 in BE order.
