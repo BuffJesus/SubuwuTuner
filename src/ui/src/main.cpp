@@ -148,10 +148,22 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // Stick to OpenGL 3.0 core-ish — the lowest target ImGui supports cleanly
-    // across Win/Mac/Linux without needing extension-loader gymnastics.
+    // macOS offers either a legacy 2.1 context or a 3.2+ core profile that
+    // must also be forward-compatible; a 3.0 request fails in NSGL. The GLSL
+    // version moves with the context: a core profile rejects "#version 130".
+#if defined(__APPLE__)
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
+    char const *const glsl_version = "#version 150";
+#else
+    // OpenGL 3.0 is the lowest target ImGui supports on Windows and Linux
+    // without an extension loader.
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
+    char const *const glsl_version = "#version 130";
+#endif
 
     GLFWwindow *window = glfwCreateWindow(1400, 880, "SubuwuTuner", nullptr, nullptr);
     if (window == nullptr) {
@@ -175,7 +187,10 @@ int main(int argc, char *argv[]) {
     // assets/icon.png). GLFW takes ownership of nothing — pixels stay
     // in our static .rodata segment. The Windows Explorer / taskbar
     // EXE icon is set separately via subuwutuner.rc + windres in
-    // src/ui/CMakeLists.txt; both originate from the same PNG.
+    // src/ui/CMakeLists.txt; both originate from the same PNG. Cocoa has
+    // no per-window icons and GLFW reports an error for the call, so
+    // macOS skips it.
+#if !defined(__APPLE__)
     {
         GLFWimage icon_image{};
         icon_image.width = st::ui::icon::kWidth;
@@ -183,6 +198,7 @@ int main(int argc, char *argv[]) {
         icon_image.pixels = const_cast<unsigned char *>(st::ui::icon::kRgba);
         glfwSetWindowIcon(window, 1, &icon_image);
     }
+#endif
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -228,7 +244,7 @@ int main(int argc, char *argv[]) {
     Fonts const fonts = load_fonts();
 
     ImGui_ImplGlfw_InitForOpenGL(window, true);
-    ImGui_ImplOpenGL3_Init("#version 130");
+    ImGui_ImplOpenGL3_Init(glsl_version);
 
     // RAII bracket for nfd's per-process state. Must outlive any dialog.
     NFD::Guard nfd_guard;
